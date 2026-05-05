@@ -73,6 +73,14 @@ MediaRow::MediaRow(const QString& sectionId, const QString& title,
     m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setWordWrap(true);
+    // IconMode + LeftToRight reports a sizeHint covering all items, which
+    // forces parents wider than the viewport when the row has many posters.
+    // Ignore the horizontal hint so the list takes whatever width the parent
+    // grants and lets its internal h-scrollbar handle the overflow.
+    QSizePolicy listPolicy = m_list->sizePolicy();
+    listPolicy.setHorizontalPolicy(QSizePolicy::Ignored);
+    m_list->setSizePolicy(listPolicy);
+    m_list->setMinimumWidth(0);
 
     const QFontMetrics fm(font());
     const int textBlock = fm.lineSpacing() * LabelLines + 6;

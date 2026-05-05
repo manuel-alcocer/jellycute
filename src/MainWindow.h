@@ -26,6 +26,7 @@ protected:
 private slots:
     void onPlayWithStart(const JellyfinItem& item, qint64 startTicks);
     void changeUser();
+    void openSettings();
     void onMpvIdleChanged(bool idle);
     void onMpvEndReached();
     void onMpvPaused(bool paused);
@@ -40,7 +41,6 @@ public:
     void slideDownPanel(QFrame* panel);
 
 private:
-    void buildMenus();
     void buildToolBar();
     void buildPlayerControlBar();
     void applyOscMode(bool useNative);
@@ -72,7 +72,6 @@ private:
     QTimer* m_progressTimer;
     QAction* m_fullscreenAct = nullptr;
     class QToolBar* m_toolBar = nullptr;
-    QAction* m_toolBarToggleAct = nullptr;
 
     JellyfinItem m_currentItem;
     bool m_playing = false;

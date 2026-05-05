@@ -20,6 +20,7 @@ add_executable(jellycute
     src/DetailPage.cpp
     src/MediaRow.cpp
     src/MpvWidget.cpp
+    src/SettingsDialog.cpp
 )
 
 target_include_directories(jellycute PRIVATE src)

@@ -1,4 +1,5 @@
 #include "DetailPage.h"
+#include "MediaRow.h"
 
 #include <QFormLayout>
 #include <QFrame>
@@ -10,8 +11,11 @@
 #include <QNetworkRequest>
 #include <QPainter>
 #include <QPixmap>
+#include <QPixmapCache>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSet>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -50,9 +54,16 @@ DetailPage::DetailPage(JellyfinClient* client, QWidget* parent)
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* container = new QWidget(scroll);
-    auto* body = new QHBoxLayout(container);
+    auto* containerLayout = new QVBoxLayout(container);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(20);
+
+    // Top section: poster (left) + info column (right).
+    auto* topSection = new QWidget(container);
+    auto* body = new QHBoxLayout(topSection);
     body->setContentsMargins(0, 0, 0, 0);
     body->setSpacing(20);
+    containerLayout->addWidget(topSection);
 
     // Poster
     m_posterLabel = new QLabel(container);
@@ -116,17 +127,21 @@ DetailPage::DetailPage(JellyfinClient* client, QWidget* parent)
     col->addWidget(m_overviewLabel);
 
     auto addInfoRow = [&](const QString& label) {
-        auto* row = new QHBoxLayout;
-        row->setSpacing(8);
-        auto* k = new QLabel(label, container);
+        // Wrap each k/v pair in a QWidget so hideIfEmpty can collapse the
+        // whole row (both the key and the value) when there's no data.
+        auto* row = new QWidget(container);
+        auto* rowLayout = new QHBoxLayout(row);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        rowLayout->setSpacing(8);
+        auto* k = new QLabel(label, row);
         k->setStyleSheet("color:#5d6164; min-width:80px;");
         k->setMinimumWidth(80);
-        auto* v = new QLabel(container);
+        auto* v = new QLabel(row);
         v->setWordWrap(true);
         v->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        row->addWidget(k, 0, Qt::AlignTop);
-        row->addWidget(v, 1, Qt::AlignTop);
-        col->addLayout(row);
+        rowLayout->addWidget(k, 0, Qt::AlignTop);
+        rowLayout->addWidget(v, 1, Qt::AlignTop);
+        col->addWidget(row);
         return v;
     };
 
@@ -137,7 +152,33 @@ DetailPage::DetailPage(JellyfinClient* client, QWidget* parent)
     m_studiosLabel   = addInfoRow(tr("Estudios"));
     m_tagsLabel      = addInfoRow(tr("Etiquetas"));
 
+    m_containerLabel       = addInfoRow(tr("Archivo"));
+    m_videoStreamLabel     = addInfoRow(tr("Vídeo"));
+    m_audioStreamsLabel    = addInfoRow(tr("Audio"));
+    m_subtitleStreamsLabel = addInfoRow(tr("Subtítulos"));
+
     col->addStretch();
+
+    // Related-content rows (under the top section, capped at 10 combined).
+    auto buildRow = [&](const QString& sectionId, const QString& title) {
+        auto* row = new MediaRow(sectionId, title,
+                                 MediaRow::PosterShape::Vertical, container);
+        row->setSeeAllVisible(false);
+        row->setVisible(false);
+        connect(row, &MediaRow::itemActivated, this,
+                [this](const JellyfinItem& it) { emit itemSelected(it); });
+        connect(row, &MediaRow::playClicked, this,
+                [this](const JellyfinItem& it) {
+                    emit playRequested(it, it.resumePositionTicks);
+                });
+        containerLayout->addWidget(row);
+        return row;
+    };
+    m_sagaRow    = buildRow(QStringLiteral("relatedSaga"),    tr("De la saga"));
+    m_genreRow   = buildRow(QStringLiteral("relatedGenre"),   tr("Mismo género"));
+    m_similarRow = buildRow(QStringLiteral("relatedSimilar"), tr("Similares"));
+
+    containerLayout->addStretch();
 
     scroll->setWidget(container);
     cardLayout->addWidget(scroll);
@@ -148,11 +189,18 @@ DetailPage::DetailPage(JellyfinClient* client, QWidget* parent)
             this, &DetailPage::onFavoriteToggled);
     connect(m_client, &JellyfinClient::playedToggled,
             this, &DetailPage::onPlayedToggled);
+    connect(m_client, &JellyfinClient::sagaSiblingsLoaded,
+            this, &DetailPage::onSagaSiblingsLoaded);
+    connect(m_client, &JellyfinClient::genrePeersLoaded,
+            this, &DetailPage::onGenrePeersLoaded);
+    connect(m_client, &JellyfinClient::similarLoaded,
+            this, &DetailPage::onSimilarLoaded);
 }
 
 void DetailPage::showItem(const JellyfinItem& item, const QStringList& ancestors) {
     m_item = item;
     m_ancestors = ancestors;
+    clearRelatedRows();
     rebuildBreadcrumb();
     rebuildInfo();
     fetchPoster();
@@ -244,14 +292,12 @@ void DetailPage::rebuildInfo() {
     m_studiosLabel->setText(m_item.studios.join(", "));
     m_tagsLabel->setText(m_item.tags.join(", "));
 
+    rebuildMediaInfo();
+
     auto hideIfEmpty = [](QLabel* lbl) {
-        // Hide both label cells (k + v) by toggling visibility on the row.
-        if (auto* row = lbl->parentWidget()) {
-            // The HBox layout containing this label was added directly to the
-            // info column; siblings stay visible. Hiding the label keeps the
-            // row collapsed visually because both cells are in the same row.
-        }
-        lbl->setVisible(!lbl->text().isEmpty());
+        // Both key and value are siblings inside the row's wrapper QWidget;
+        // toggling the wrapper hides the row entirely.
+        if (auto* row = lbl->parentWidget()) row->setVisible(!lbl->text().isEmpty());
     };
     hideIfEmpty(m_genresLabel);
     hideIfEmpty(m_directorsLabel);
@@ -259,8 +305,93 @@ void DetailPage::rebuildInfo() {
     hideIfEmpty(m_castLabel);
     hideIfEmpty(m_studiosLabel);
     hideIfEmpty(m_tagsLabel);
+    hideIfEmpty(m_containerLabel);
+    hideIfEmpty(m_videoStreamLabel);
+    hideIfEmpty(m_audioStreamsLabel);
+    hideIfEmpty(m_subtitleStreamsLabel);
 
     updateActionButtons();
+}
+
+namespace {
+QString formatBitrate(qint64 bps) {
+    if (bps <= 0) return {};
+    if (bps >= 1'000'000)
+        return QString::number(bps / 1'000'000.0, 'f', 1) + QStringLiteral(" Mbps");
+    return QString::number(bps / 1000) + QStringLiteral(" kbps");
+}
+
+QString formatFileSize(qint64 bytes) {
+    if (bytes <= 0) return {};
+    constexpr qint64 GB = 1'000'000'000;
+    constexpr qint64 MB = 1'000'000;
+    if (bytes >= GB) return QString::number(bytes / double(GB), 'f', 2) + QStringLiteral(" GB");
+    return QString::number(bytes / double(MB), 'f', 0) + QStringLiteral(" MB");
+}
+
+QString channelLayout(int channels) {
+    switch (channels) {
+        case 1: return QStringLiteral("Mono");
+        case 2: return QStringLiteral("Stereo");
+        case 6: return QStringLiteral("5.1");
+        case 8: return QStringLiteral("7.1");
+        default: return channels > 0 ? QString::number(channels) + QStringLiteral("ch") : QString();
+    }
+}
+
+QString streamLine(const JellyfinMediaStream& s, bool includeChannels) {
+    QStringList parts;
+    if (!s.language.isEmpty()) parts << s.language.toUpper();
+    if (!s.codec.isEmpty()) parts << s.codec.toUpper();
+    if (includeChannels) {
+        const QString ch = channelLayout(s.channels);
+        if (!ch.isEmpty()) parts << ch;
+    }
+    QStringList flags;
+    if (s.isDefault) flags << QObject::tr("predeterminado");
+    if (s.isForced)  flags << QObject::tr("forzado");
+    QString line = QStringLiteral("• ") + parts.join(QStringLiteral(" — "));
+    if (!flags.isEmpty()) line += QStringLiteral(" [") + flags.join(", ") + QStringLiteral("]");
+    return line;
+}
+}
+
+void DetailPage::rebuildMediaInfo() {
+    if (m_item.mediaSources.isEmpty()) {
+        m_containerLabel->clear();
+        m_videoStreamLabel->clear();
+        m_audioStreamsLabel->clear();
+        m_subtitleStreamsLabel->clear();
+        return;
+    }
+    const JellyfinMediaSource& src = m_item.mediaSources.first();
+
+    QStringList containerBits;
+    if (!src.container.isEmpty()) containerBits << src.container.toUpper();
+    const QString br = formatBitrate(src.bitrate);
+    if (!br.isEmpty()) containerBits << br;
+    const QString sz = formatFileSize(src.size);
+    if (!sz.isEmpty()) containerBits << sz;
+    m_containerLabel->setText(containerBits.join(QStringLiteral("  •  ")));
+
+    QStringList audioLines, subLines;
+    QString videoLine;
+    for (const auto& s : src.streams) {
+        if (s.type == "Video" && videoLine.isEmpty()) {
+            QStringList parts;
+            if (!s.codec.isEmpty()) parts << s.codec.toUpper();
+            if (s.width > 0 && s.height > 0)
+                parts << QString::number(s.width) + QStringLiteral("×") + QString::number(s.height);
+            videoLine = parts.join(QStringLiteral(" — "));
+        } else if (s.type == "Audio") {
+            audioLines << streamLine(s, /*includeChannels=*/true);
+        } else if (s.type == "Subtitle") {
+            subLines << streamLine(s, /*includeChannels=*/false);
+        }
+    }
+    m_videoStreamLabel->setText(videoLine);
+    m_audioStreamsLabel->setText(audioLines.join(QStringLiteral("\n")));
+    m_subtitleStreamsLabel->setText(subLines.join(QStringLiteral("\n")));
 }
 
 void DetailPage::updateActionButtons() {
@@ -321,6 +452,120 @@ void DetailPage::onItemDetailsLoaded(const JellyfinItem& item) {
     // fetchPoster() call inside showItem() found nothing. Now that we have
     // the full record, retry.
     fetchPoster();
+    // Related-content lookups: only meaningful for movies. Episodes/series
+    // would surface unrelated results.
+    if (m_item.type == QStringLiteral("Movie")) {
+        m_client->fetchSagaSiblings(m_item.id);
+        m_client->fetchGenrePeers(m_item.id, m_item.genres, 10);
+        m_client->fetchSimilar(m_item.id, 10);
+    }
+}
+
+void DetailPage::onSagaSiblingsLoaded(const QString& itemId,
+                                      const QList<JellyfinItem>& items) {
+    if (itemId != m_item.id) return;
+    m_sagaItems = items;
+    rebuildRelatedRows();
+}
+
+void DetailPage::onGenrePeersLoaded(const QString& itemId,
+                                    const QList<JellyfinItem>& items) {
+    if (itemId != m_item.id) return;
+    m_genreItems = items;
+    rebuildRelatedRows();
+}
+
+void DetailPage::onSimilarLoaded(const QString& itemId,
+                                 const QList<JellyfinItem>& items) {
+    if (itemId != m_item.id) return;
+    m_similarItems = items;
+    rebuildRelatedRows();
+}
+
+void DetailPage::clearRelatedRows() {
+    m_sagaItems.clear();
+    m_genreItems.clear();
+    m_similarItems.clear();
+    if (m_sagaRow)    { m_sagaRow->clear();    m_sagaRow->setVisible(false);    }
+    if (m_genreRow)   { m_genreRow->clear();   m_genreRow->setVisible(false);   }
+    if (m_similarRow) { m_similarRow->clear(); m_similarRow->setVisible(false); }
+}
+
+void DetailPage::rebuildRelatedRows() {
+    // Priority order with a hard cap of 10 across the three sections.
+    constexpr int kCap = 10;
+    QSet<QString> seen{m_item.id};
+    auto take = [&](const QList<JellyfinItem>& src, int budget) {
+        QList<JellyfinItem> out;
+        for (const auto& it : src) {
+            if (budget <= 0) break;
+            if (it.id.isEmpty() || seen.contains(it.id)) continue;
+            seen.insert(it.id);
+            out << it;
+            --budget;
+        }
+        return out;
+    };
+
+    int remaining = kCap;
+    const auto saga    = take(m_sagaItems,    remaining); remaining -= saga.size();
+    const auto genre   = take(m_genreItems,   remaining); remaining -= genre.size();
+    const auto similar = take(m_similarItems, remaining); remaining -= similar.size();
+
+    auto fill = [this](MediaRow* row, const QList<JellyfinItem>& items) {
+        row->clear();
+        if (items.isEmpty()) { row->setVisible(false); return; }
+        row->setItems(items);
+        row->setVisible(true);
+        for (const auto& it : items) fetchRelatedPoster(row, it);
+    };
+    fill(m_sagaRow, saga);
+    fill(m_genreRow, genre);
+    fill(m_similarRow, similar);
+}
+
+void DetailPage::fetchRelatedPoster(MediaRow* row, const JellyfinItem& it) {
+    QString tag = it.primaryImageTag;
+    QString imageId = it.id;
+    if (tag.isEmpty() && !it.seriesPrimaryImageTag.isEmpty()) {
+        tag = it.seriesPrimaryImageTag;
+        imageId = it.seriesId;
+    }
+    if (tag.isEmpty()) return;
+
+    const QSize iconSize = row->posterSize();
+    QUrl u = m_client->imageUrl(imageId, tag, QStringLiteral("Primary"),
+                                iconSize.height() * 2);
+    const QString cacheKey = u.toString() + QStringLiteral("|")
+                             + QString::number(iconSize.width()) + QStringLiteral("x")
+                             + QString::number(iconSize.height());
+
+    QPixmap cached;
+    if (QPixmapCache::find(cacheKey, &cached)) {
+        row->setItemIcon(it.id, QIcon(cached));
+        return;
+    }
+
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Emby-Authorization",
+                     QString("MediaBrowser Token=\"%1\"")
+                         .arg(m_client->accessToken()).toUtf8());
+    QNetworkReply* reply = m_imgNam->get(req);
+    const QString itemId = it.id;
+    const QString currentDetailId = m_item.id;
+    QPointer<MediaRow> rowGuard(row);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, rowGuard, itemId, currentDetailId, iconSize, cacheKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) return;
+        if (m_item.id != currentDetailId || !rowGuard) return;
+        QPixmap pm;
+        if (!pm.loadFromData(reply->readAll())) return;
+        const QPixmap scaled = pm.scaled(iconSize, Qt::KeepAspectRatio,
+                                         Qt::SmoothTransformation);
+        QPixmapCache::insert(cacheKey, scaled);
+        rowGuard->setItemIcon(itemId, QIcon(scaled));
+    });
 }
 
 void DetailPage::onFavoriteToggled(const QString& itemId, bool fav) {

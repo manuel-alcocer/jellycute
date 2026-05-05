@@ -82,6 +82,13 @@ int main(int argc, char** argv) {
             background: transparent;
         }
 
+        /* Grid viewport: opaque card background so the empty area below the
+           last row repaints cleanly (transparent pass-through can leave
+           1-px stale-paint artifacts at the bottom edge). */
+        QWidget#gridViewport {
+            background-color: #fcfcfc;
+        }
+
         /* List items: tight padding, 4px-rounded selection, soft hover. */
         QListView::item, QListWidget::item {
             border-radius: 4px;

@@ -17,6 +17,27 @@ struct JellyfinPerson {
     QString primaryImageTag;
 };
 
+struct JellyfinMediaStream {
+    QString type;          // "Video", "Audio", "Subtitle"
+    QString codec;
+    QString language;      // 3-letter ISO (e.g. "spa", "eng"); may be empty
+    QString displayTitle;  // server-formatted, e.g. "Spanish - DTS-HD MA - 5.1"
+    QString title;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    bool isDefault = false;
+    bool isForced = false;
+};
+
+struct JellyfinMediaSource {
+    QString container;     // e.g. "mkv", "mp4"
+    qint64 runTimeTicks = 0;
+    qint64 bitrate = 0;    // bits per second
+    qint64 size = 0;       // bytes
+    QList<JellyfinMediaStream> streams;
+};
+
 struct JellyfinItem {
     QString id;
     QString name;
@@ -48,6 +69,7 @@ struct JellyfinItem {
     QStringList tags;
     QList<JellyfinPerson> people;
     QString backdropImageTag;
+    QList<JellyfinMediaSource> mediaSources;   // populated by fetchItemDetails
 };
 
 class JellyfinClient : public QObject {
@@ -84,6 +106,13 @@ public:
                      int limit = 16);
     void fetchItemDetails(const QString& itemId);
 
+    // Related-content lookups for the detail page.
+    void fetchSagaSiblings(const QString& itemId);
+    void fetchGenrePeers(const QString& itemId,
+                         const QStringList& genres,
+                         int limit = 10);
+    void fetchSimilar(const QString& itemId, int limit = 10);
+
     // User-data mutations.
     void setFavorite(const QString& itemId, bool favorite);
     void setPlayed(const QString& itemId, bool played);
@@ -113,6 +142,9 @@ signals:
     void itemDetailsLoaded(const JellyfinItem& item);
     void favoriteToggled(const QString& itemId, bool isFavorite);
     void playedToggled(const QString& itemId, bool isPlayed);
+    void sagaSiblingsLoaded(const QString& itemId, const QList<JellyfinItem>& items);
+    void genrePeersLoaded(const QString& itemId, const QList<JellyfinItem>& items);
+    void similarLoaded(const QString& itemId, const QList<JellyfinItem>& items);
     void networkError(const QString& message);
 
 private:

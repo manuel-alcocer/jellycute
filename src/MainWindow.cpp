@@ -2,6 +2,7 @@
 #include "BrowserWidget.h"
 #include "LoginDialog.h"
 #include "MpvWidget.h"
+#include "SettingsDialog.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -178,6 +179,30 @@ QIcon iconAspect() {
         p.drawLine(QPointF(18, 15), QPointF(18, 11));
     });
 }
+QIcon iconSettings() {
+    // Three sliders: line + knob marker per row.
+    return makeIcon(24, [](QPainter& p) {
+        p.setBrush(QColor("#fcfcfc"));
+        p.drawLine(QPointF(3, 7),  QPointF(8, 7));
+        p.drawLine(QPointF(13, 7), QPointF(21, 7));
+        p.drawEllipse(QPointF(10.5, 7), 2.5, 2.5);
+        p.drawLine(QPointF(3, 12),  QPointF(15, 12));
+        p.drawLine(QPointF(20, 12), QPointF(21, 12));
+        p.drawEllipse(QPointF(17.5, 12), 2.5, 2.5);
+        p.drawLine(QPointF(3, 17),  QPointF(11, 17));
+        p.drawLine(QPointF(16, 17), QPointF(21, 17));
+        p.drawEllipse(QPointF(13.5, 17), 2.5, 2.5);
+    });
+}
+QIcon iconExit() {
+    // Power symbol: open ring + vertical bar at the top.
+    return makeIcon(24, [](QPainter& p) {
+        QRectF ring(4, 5, 16, 16);
+        // Arc starting at -60° spanning -240° (i.e. opens facing up).
+        p.drawArc(ring, -150 * 16, -240 * 16);
+        p.drawLine(QPointF(12, 3), QPointF(12, 11));
+    });
+}
 }
 
 /* Custom widget that owns its paintEvent fully: each setText() schedules a
@@ -292,110 +317,13 @@ MainWindow::MainWindow(JellyfinClient* client, QWidget* parent)
             this, &MainWindow::exitFullscreen);
     connect(m_progressTimer, &QTimer::timeout, this, &MainWindow::reportProgressTick);
 
-    buildMenus();
+    // No menu bar: all configuration is reachable from the toolbar's
+    // settings dialog.
+    setMenuBar(nullptr);
     buildToolBar();
 
     m_browser->start();
     statusBar()->showMessage(tr("Conectado a %1").arg(client->server().toString()));
-}
-
-void MainWindow::buildMenus() {
-    // Files: app-level actions (logout, quit).
-    auto* fileMenu = menuBar()->addMenu(tr("&Files"));
-
-    auto* logoutAct = fileMenu->addAction(tr("Cerrar sesión"));
-    connect(logoutAct, &QAction::triggered, this, [this]() {
-        QSettings s;
-        s.remove("token");
-        s.remove("userId");
-        close();
-    });
-
-    fileMenu->addSeparator();
-
-    auto* quitAct = fileMenu->addAction(tr("Salir"));
-    quitAct->setShortcut(QKeySequence::Quit);
-    quitAct->setShortcutContext(Qt::ApplicationShortcut);
-    connect(quitAct, &QAction::triggered, this, &QMainWindow::close);
-
-    // Settings: HW decoding, toolbar visibility, fullscreen.
-    auto* settingsMenu = menuBar()->addMenu(tr("&Settings"));
-
-    // Library visibility — populated dynamically when views arrive.
-    auto* libsMenu = settingsMenu->addMenu(tr("Bibliotecas"));
-    auto rebuildLibsMenu = [this, libsMenu]() {
-        libsMenu->clear();
-        const auto libs = m_browser->allLibraries();
-        if (libs.isEmpty()) {
-            auto* a = libsMenu->addAction(tr("(sin bibliotecas)"));
-            a->setEnabled(false);
-            return;
-        }
-        for (const auto& lib : libs) {
-            auto* a = libsMenu->addAction(lib.name);
-            a->setCheckable(true);
-            a->setChecked(!m_browser->isLibraryHidden(lib.id));
-            const QString id = lib.id;
-            connect(a, &QAction::toggled, this, [this, id](bool show) {
-                m_browser->setLibraryHidden(id, !show);
-            });
-        }
-    };
-    rebuildLibsMenu();
-    connect(m_browser, &BrowserWidget::librariesChanged,
-            this, [rebuildLibsMenu](const QList<JellyfinItem>&) { rebuildLibsMenu(); });
-
-    auto* hwMenu = settingsMenu->addMenu(tr("Decodificación de hardware"));
-    auto* hwGroup = new QActionGroup(this);
-    hwGroup->setExclusive(true);
-    const QString detected = m_player->detectedDefaultHwdec();
-    auto* autoAct = hwMenu->addAction(tr("Automático (detectado: %1)").arg(detected));
-    autoAct->setCheckable(true);
-    autoAct->setData(QString());
-    hwGroup->addAction(autoAct);
-    hwMenu->addSeparator();
-    for (const QString& c : m_player->availableHwdecChoices()) {
-        auto* a = hwMenu->addAction(c);
-        a->setCheckable(true);
-        a->setData(c);
-        hwGroup->addAction(a);
-    }
-    const QString currentHwdec = m_player->hwdecSetting();
-    for (auto* a : hwGroup->actions()) {
-        if (a->data().toString() == currentHwdec) { a->setChecked(true); break; }
-    }
-    if (!hwGroup->checkedAction()) autoAct->setChecked(true);
-    connect(hwGroup, &QActionGroup::triggered, this, [this](QAction* a) {
-        m_player->setHwdecSetting(a->data().toString());
-        statusBar()->showMessage(
-            tr("Decodificación HW: %1").arg(m_player->resolvedHwdec()), 4000);
-    });
-
-    settingsMenu->addSeparator();
-
-    m_toolBarToggleAct = settingsMenu->addAction(tr("Mostrar barra de herramientas"));
-    m_toolBarToggleAct->setCheckable(true);
-    const bool tbVisible = QSettings().value(QStringLiteral("toolbarVisible"), true).toBool();
-    m_toolBarToggleAct->setChecked(tbVisible);
-    connect(m_toolBarToggleAct, &QAction::toggled, this, [this](bool on) {
-        if (m_toolBar) m_toolBar->setVisible(on);
-        QSettings().setValue(QStringLiteral("toolbarVisible"), on);
-    });
-
-    m_fullscreenAct = settingsMenu->addAction(tr("Pantalla completa"));
-    m_fullscreenAct->setShortcut(QKeySequence(Qt::Key_F11));
-    m_fullscreenAct->setShortcutContext(Qt::ApplicationShortcut);
-    m_fullscreenAct->setCheckable(true);
-    connect(m_fullscreenAct, &QAction::toggled, this, [this](bool on) {
-        if (on == isFullScreen() && menuBar()->isHidden() == on) return;
-        menuBar()->setVisible(!on);
-        statusBar()->setVisible(!on);
-        if (m_playerBar) m_playerBar->setVisible(!on);
-        if (m_toolBar && m_toolBarToggleAct && m_toolBarToggleAct->isChecked())
-            m_toolBar->setVisible(!on);
-        if (on) showFullScreen(); else showNormal();
-        if (on) m_player->setFocus();
-    });
 }
 
 void MainWindow::buildToolBar() {
@@ -437,10 +365,19 @@ void MainWindow::buildToolBar() {
 
     m_toolBar->addSeparator();
 
-    if (m_fullscreenAct) {
-        m_fullscreenAct->setIcon(iconFullscreen());
-        m_toolBar->addAction(m_fullscreenAct);
-    }
+    m_fullscreenAct = new QAction(iconFullscreen(), tr("Pantalla completa"), this);
+    m_fullscreenAct->setShortcut(QKeySequence(Qt::Key_F11));
+    m_fullscreenAct->setShortcutContext(Qt::ApplicationShortcut);
+    m_fullscreenAct->setCheckable(true);
+    connect(m_fullscreenAct, &QAction::toggled, this, [this](bool on) {
+        if (on == isFullScreen()) return;
+        statusBar()->setVisible(!on);
+        if (m_playerBar) m_playerBar->setVisible(!on);
+        if (m_toolBar) m_toolBar->setVisible(!on);
+        if (on) showFullScreen(); else showNormal();
+        if (on) m_player->setFocus();
+    });
+    m_toolBar->addAction(m_fullscreenAct);
 
     m_oscToggleAct = m_toolBar->addAction(iconOsc(),
                                           tr("Alternar OSC mpv / controles propios"));
@@ -452,9 +389,20 @@ void MainWindow::buildToolBar() {
             [this](bool on) { applyOscMode(on); });
     applyOscMode(useNativeOsc);
 
-    const bool show = QSettings().value(QStringLiteral("toolbarVisible"), true).toBool();
-    m_toolBar->setVisible(show);
-    if (m_toolBarToggleAct) m_toolBarToggleAct->setChecked(show);
+    m_toolBar->addSeparator();
+
+    auto* settingsAct = m_toolBar->addAction(iconSettings(), tr("Ajustes"));
+    connect(settingsAct, &QAction::triggered, this, &MainWindow::openSettings);
+
+    auto* exitAct = m_toolBar->addAction(iconExit(), tr("Salir"));
+    exitAct->setShortcut(QKeySequence::Quit);
+    exitAct->setShortcutContext(Qt::ApplicationShortcut);
+    connect(exitAct, &QAction::triggered, this, &QMainWindow::close);
+}
+
+void MainWindow::openSettings() {
+    SettingsDialog dlg(m_browser, m_player, this);
+    dlg.exec();
 }
 
 void MainWindow::buildPlayerControlBar() {

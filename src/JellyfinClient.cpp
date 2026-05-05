@@ -8,6 +8,8 @@
 #include <QUuid>
 #include <QSettings>
 
+#include <memory>
+
 JellyfinClient::JellyfinClient(QObject* parent) : QObject(parent) {
     QSettings s;
     m_deviceId = s.value(QStringLiteral("deviceId")).toString();
@@ -120,6 +122,31 @@ static JellyfinItem parseSingleItem(const QJsonObject& o) {
     }
     const auto backdrops = o.value("BackdropImageTags").toArray();
     if (!backdrops.isEmpty()) it.backdropImageTag = backdrops.first().toString();
+
+    for (const auto& msv : o.value("MediaSources").toArray()) {
+        const auto mso = msv.toObject();
+        JellyfinMediaSource src;
+        src.container = mso.value("Container").toString();
+        src.runTimeTicks = (qint64) mso.value("RunTimeTicks").toDouble();
+        src.bitrate = (qint64) mso.value("Bitrate").toDouble();
+        src.size = (qint64) mso.value("Size").toDouble();
+        for (const auto& sv : mso.value("MediaStreams").toArray()) {
+            const auto so = sv.toObject();
+            JellyfinMediaStream st;
+            st.type = so.value("Type").toString();
+            st.codec = so.value("Codec").toString();
+            st.language = so.value("Language").toString();
+            st.displayTitle = so.value("DisplayTitle").toString();
+            st.title = so.value("Title").toString();
+            st.width = so.value("Width").toInt();
+            st.height = so.value("Height").toInt();
+            st.channels = so.value("Channels").toInt();
+            st.isDefault = so.value("IsDefault").toBool();
+            st.isForced = so.value("IsForced").toBool();
+            src.streams << st;
+        }
+        it.mediaSources << src;
+    }
     return it;
 }
 
@@ -269,7 +296,8 @@ QUrl JellyfinClient::streamUrl(const QString& itemId) const {
 void JellyfinClient::fetchItemDetails(const QString& itemId) {
     QList<QPair<QString,QString>> q = {
         {"Fields", "Overview,People,Genres,Studios,Tags,OfficialRating,"
-                   "CommunityRating,UserData,BackdropImageTags,SeriesPrimaryImageTag"},
+                   "CommunityRating,UserData,BackdropImageTags,"
+                   "SeriesPrimaryImageTag,MediaSources,MediaStreams"},
     };
     QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Items/" + itemId, q));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -280,6 +308,117 @@ void JellyfinClient::fetchItemDetails(const QString& itemId) {
         }
         const auto doc = QJsonDocument::fromJson(reply->readAll());
         emit itemDetailsLoaded(parseSingleItem(doc.object()));
+    });
+}
+
+void JellyfinClient::fetchSagaSiblings(const QString& itemId) {
+    // Jellyfin doesn't expose a direct "find BoxSets that contain this item"
+    // filter, so we list every BoxSet and probe each one's children in
+    // parallel. The first BoxSet whose children contain `itemId` wins and we
+    // emit its siblings; if none match we emit an empty list. QNAM caps
+    // concurrent connections automatically, so even libraries with hundreds
+    // of BoxSets stay polite.
+    QList<QPair<QString,QString>> q = {
+        {"Recursive", "true"},
+        {"IncludeItemTypes", "BoxSet"},
+        {"Limit", "500"},
+        {"EnableImages", "false"},
+    };
+    QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Items", q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit sagaSiblingsLoaded(itemId, {});
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        const auto boxSets = doc.object().value("Items").toArray();
+        if (boxSets.isEmpty()) {
+            emit sagaSiblingsLoaded(itemId, {});
+            return;
+        }
+        struct State { int pending; bool emitted; };
+        auto state = std::make_shared<State>(State{(int)boxSets.size(), false});
+        for (const auto& bs : boxSets) {
+            const QString boxSetId = bs.toObject().value("Id").toString();
+            if (boxSetId.isEmpty()) {
+                if (--state->pending == 0 && !state->emitted)
+                    emit sagaSiblingsLoaded(itemId, {});
+                continue;
+            }
+            QList<QPair<QString,QString>> qChildren = {
+                {"ParentId", boxSetId},
+                {"Fields", "PrimaryImageAspectRatio,UserData,SeriesPrimaryImageTag"},
+                {"SortBy", "ProductionYear,SortName"},
+                {"SortOrder", "Ascending"},
+                {"ImageTypeLimit", "1"},
+            };
+            QNetworkReply* r2 = m_nam.get(makeRequest("/Users/" + m_userId + "/Items", qChildren));
+            connect(r2, &QNetworkReply::finished, this, [this, r2, state, itemId]() {
+                r2->deleteLater();
+                if (state->emitted) {
+                    if (--state->pending == 0) { /* state auto-released */ }
+                    return;
+                }
+                if (r2->error() == QNetworkReply::NoError) {
+                    const auto d = QJsonDocument::fromJson(r2->readAll());
+                    const auto children = parseItems(d.object().value("Items").toArray());
+                    for (const auto& it : children) {
+                        if (it.id == itemId) {
+                            state->emitted = true;
+                            emit sagaSiblingsLoaded(itemId, children);
+                            break;
+                        }
+                    }
+                }
+                if (--state->pending == 0 && !state->emitted) {
+                    emit sagaSiblingsLoaded(itemId, {});
+                }
+            });
+        }
+    });
+}
+
+void JellyfinClient::fetchGenrePeers(const QString& itemId,
+                                     const QStringList& genres, int limit) {
+    if (genres.isEmpty()) { emit genrePeersLoaded(itemId, {}); return; }
+    QList<QPair<QString,QString>> q = {
+        {"Recursive", "true"},
+        {"IncludeItemTypes", "Movie"},
+        {"Genres", genres.join('|')},  // Jellyfin treats '|' as OR
+        {"Limit", QString::number(limit)},
+        {"SortBy", "Random"},
+        {"Fields", "PrimaryImageAspectRatio,UserData,SeriesPrimaryImageTag"},
+        {"ImageTypeLimit", "1"},
+        {"ExcludeItemIds", itemId},
+    };
+    QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Items", q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit genrePeersLoaded(itemId, {});
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        emit genrePeersLoaded(itemId, parseItems(doc.object().value("Items").toArray()));
+    });
+}
+
+void JellyfinClient::fetchSimilar(const QString& itemId, int limit) {
+    QList<QPair<QString,QString>> q = {
+        {"UserId", m_userId},
+        {"Limit", QString::number(limit)},
+        {"Fields", "PrimaryImageAspectRatio,UserData,SeriesPrimaryImageTag"},
+    };
+    QNetworkReply* reply = m_nam.get(makeRequest("/Items/" + itemId + "/Similar", q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit similarLoaded(itemId, {});
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        emit similarLoaded(itemId, parseItems(doc.object().value("Items").toArray()));
     });
 }
 

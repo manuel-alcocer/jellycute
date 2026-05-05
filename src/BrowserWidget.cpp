@@ -2,6 +2,7 @@
 #include "DetailPage.h"
 #include "MediaRow.h"
 
+#include <QApplication>
 #include <QDir>
 #include <QEvent>
 #include <QGridLayout>
@@ -140,6 +141,8 @@ BrowserWidget::BrowserWidget(JellyfinClient* client, QWidget* parent)
         else
             popToBreadcrumb(idx);
     });
+    connect(m_detail, &DetailPage::itemSelected, this,
+            [this](const JellyfinItem& it) { showDetail(it); });
 
     auto* root = new QHBoxLayout(this);
     root->setContentsMargins(6, 6, 6, 6);   // breathing room around panels
@@ -260,6 +263,10 @@ void BrowserWidget::buildGridPage() {
     m_grid->setWordWrap(true);
     m_grid->setSelectionMode(QAbstractItemView::SingleSelection);
     m_grid->setFrameShape(QFrame::NoFrame);
+    // Opaque viewport (matches contentCard) avoids stale-paint hairlines in
+    // the empty area below the last row when relying on the parent's
+    // transparent pass-through.
+    m_grid->viewport()->setObjectName(QStringLiteral("gridViewport"));
     m_grid->viewport()->installEventFilter(this);
     cardLayout->addWidget(m_grid);
 
@@ -287,12 +294,7 @@ void BrowserWidget::buildGridPage() {
     pf.setBold(true);
     pf.setPointSize(pf.pointSize() + 1);
     panelTitle->setFont(pf);
-    auto* panelClose = new QToolButton(m_letterPanel);
-    panelClose->setText(QStringLiteral("✕"));
-    panelClose->setAutoRaise(true);
-    panelClose->setCursor(Qt::PointingHandCursor);
     panelHeader->addWidget(panelTitle, 1);
-    panelHeader->addWidget(panelClose);
     panelLayout->addLayout(panelHeader);
 
     auto* g = new QGridLayout;
@@ -322,9 +324,11 @@ void BrowserWidget::buildGridPage() {
     panelLayout->addLayout(g);
     panelLayout->addStretch();
 
-    connect(panelClose, &QToolButton::clicked, this, [this]() { slideOutLetterPanel(); });
     connect(m_grid, &QListWidget::itemClicked, this, &BrowserWidget::onItemActivated);
-    connect(m_letterBtn, &QToolButton::clicked, this, [this]() { slideInLetterPanel(); });
+    connect(m_letterBtn, &QToolButton::clicked, this, [this]() {
+        if (m_letterPanel && m_letterPanel->isVisible()) slideOutLetterPanel();
+        else slideInLetterPanel();
+    });
 
     m_gridPage->installEventFilter(this);
 }
@@ -574,6 +578,7 @@ void BrowserWidget::slideInLetterPanel() {
     const int panelW = qMin(320, m_gridPage->width() - 40);
     const int parentH = m_gridPage->height();
     const int parentW = m_gridPage->width();
+    const bool wasVisible = m_letterPanel->isVisible();
     m_letterPanel->setGeometry(parentW, 0, panelW, parentH);
     m_letterPanel->show();
     m_letterPanel->raise();
@@ -583,10 +588,13 @@ void BrowserWidget::slideInLetterPanel() {
     anim->setEndValue(QRect(parentW - panelW, 0, panelW, parentH));
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
+    // Watch app-wide mouse presses while open so a click outside closes it.
+    if (!wasVisible) qApp->installEventFilter(this);
 }
 
 void BrowserWidget::slideOutLetterPanel() {
     if (!m_letterPanel || !m_letterPanel->isVisible()) return;
+    qApp->removeEventFilter(this);
     const QRect start = m_letterPanel->geometry();
     auto* anim = new QPropertyAnimation(m_letterPanel, "geometry", this);
     anim->setDuration(180);
@@ -1026,6 +1034,17 @@ bool BrowserWidget::eventFilter(QObject* watched, QEvent* event) {
         const int panelW = m_letterPanel->width();
         m_letterPanel->setGeometry(m_gridPage->width() - panelW, 0,
                                     panelW, m_gridPage->height());
+    }
+    // While the letter panel is open, an app-wide filter is installed so any
+    // mouse press outside the panel (and outside the A-Z toggle, which manages
+    // its own open/close) dismisses it.
+    if (m_letterPanel && m_letterPanel->isVisible()
+        && event->type() == QEvent::MouseButtonPress) {
+        if (auto* w = qobject_cast<QWidget*>(watched)) {
+            const bool insidePanel = (w == m_letterPanel) || m_letterPanel->isAncestorOf(w);
+            const bool onToggle = (w == m_letterBtn) || m_letterBtn->isAncestorOf(w);
+            if (!insidePanel && !onToggle) slideOutLetterPanel();
+        }
     }
     if (m_grid && watched == m_grid->viewport()) {
         if (event->type() == QEvent::Resize) {
