@@ -1,0 +1,346 @@
+#include "JellyfinClient.h"
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QSysInfo>
+#include <QUrlQuery>
+#include <QUuid>
+#include <QSettings>
+
+JellyfinClient::JellyfinClient(QObject* parent) : QObject(parent) {
+    QSettings s;
+    m_deviceId = s.value(QStringLiteral("deviceId")).toString();
+    if (m_deviceId.isEmpty()) {
+        m_deviceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        s.setValue(QStringLiteral("deviceId"), m_deviceId);
+    }
+}
+
+void JellyfinClient::setServer(const QUrl& url) { m_server = url; }
+
+void JellyfinClient::setCredentials(const QString& userId, const QString& accessToken) {
+    m_userId = userId;
+    m_token = accessToken;
+}
+
+QString JellyfinClient::authHeader(bool withToken) const {
+    const QString deviceName = QSysInfo::machineHostName();
+    QString h = QString("MediaBrowser Client=\"%1\", Device=\"%2\", DeviceId=\"%3\", Version=\"%4\"")
+                    .arg(m_clientName, deviceName, m_deviceId, m_clientVersion);
+    if (withToken && !m_token.isEmpty())
+        h += QString(", Token=\"%1\"").arg(m_token);
+    return h;
+}
+
+QNetworkRequest JellyfinClient::makeRequest(const QString& path,
+                                            const QList<QPair<QString,QString>>& query) const {
+    QUrl url = m_server;
+    QString basePath = url.path();
+    if (basePath.endsWith('/')) basePath.chop(1);
+    url.setPath(basePath + path);
+    if (!query.isEmpty()) {
+        QUrlQuery q;
+        for (const auto& kv : query) q.addQueryItem(kv.first, kv.second);
+        url.setQuery(q);
+    }
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("X-Emby-Authorization", authHeader(true).toUtf8());
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
+    return req;
+}
+
+void JellyfinClient::authenticate(const QString& username, const QString& password) {
+    QNetworkRequest req(QUrl(m_server.toString() + "/Users/AuthenticateByName"));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    req.setRawHeader("X-Emby-Authorization", authHeader(false).toUtf8());
+
+    QJsonObject body;
+    body["Username"] = username;
+    body["Pw"] = password;
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit authenticationFailed(reply->errorString());
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        const auto obj = doc.object();
+        m_token = obj.value("AccessToken").toString();
+        m_userId = obj.value("User").toObject().value("Id").toString();
+        if (m_token.isEmpty() || m_userId.isEmpty()) {
+            emit authenticationFailed(tr("Respuesta de autenticación inválida"));
+            return;
+        }
+        emit authenticated();
+    });
+}
+
+static JellyfinItem parseSingleItem(const QJsonObject& o) {
+    JellyfinItem it;
+    it.id = o.value("Id").toString();
+    it.name = o.value("Name").toString();
+    it.type = o.value("Type").toString();
+    it.collectionType = o.value("CollectionType").toString();
+    it.seriesName = o.value("SeriesName").toString();
+    it.seriesId = o.value("SeriesId").toString();
+    it.productionYear = o.value("ProductionYear").toInt();
+    it.runTimeTicks = (qint64) o.value("RunTimeTicks").toDouble();
+    it.isFolder = o.value("IsFolder").toBool();
+    it.indexNumber = o.value("IndexNumber").toInt();
+    it.parentIndexNumber = o.value("ParentIndexNumber").toInt();
+    const auto userData = o.value("UserData").toObject();
+    it.resumePositionTicks = (qint64) userData.value("PlaybackPositionTicks").toDouble();
+    it.isFavorite = userData.value("IsFavorite").toBool();
+    it.isPlayed = userData.value("Played").toBool();
+    const auto tags = o.value("ImageTags").toObject();
+    it.primaryImageTag = tags.value("Primary").toString();
+    it.seriesPrimaryImageTag = o.value("SeriesPrimaryImageTag").toString();
+
+    // Detail-only fields (populated when Fields= asks for them).
+    it.overview = o.value("Overview").toString();
+    it.officialRating = o.value("OfficialRating").toString();
+    it.communityRating = o.value("CommunityRating").toDouble();
+    for (const auto& g : o.value("Genres").toArray()) it.genres << g.toString();
+    for (const auto& s : o.value("Studios").toArray())
+        it.studios << s.toObject().value("Name").toString();
+    for (const auto& t : o.value("Tags").toArray()) it.tags << t.toString();
+    for (const auto& p : o.value("People").toArray()) {
+        const auto po = p.toObject();
+        JellyfinPerson person;
+        person.id = po.value("Id").toString();
+        person.name = po.value("Name").toString();
+        person.role = po.value("Role").toString();
+        person.type = po.value("Type").toString();
+        person.primaryImageTag = po.value("PrimaryImageTag").toString();
+        it.people << person;
+    }
+    const auto backdrops = o.value("BackdropImageTags").toArray();
+    if (!backdrops.isEmpty()) it.backdropImageTag = backdrops.first().toString();
+    return it;
+}
+
+QList<JellyfinItem> JellyfinClient::parseItems(const QJsonArray& arr) const {
+    QList<JellyfinItem> out;
+    out.reserve(arr.size());
+    for (const auto& v : arr) out.push_back(parseSingleItem(v.toObject()));
+    return out;
+}
+
+void JellyfinClient::handleItemsReply(QNetworkReply* reply, const QString& parentId) {
+    reply->deleteLater();
+    if (reply->error() != QNetworkReply::NoError) {
+        emit networkError(reply->errorString());
+        return;
+    }
+    const auto doc = QJsonDocument::fromJson(reply->readAll());
+    const auto obj = doc.object();
+    const auto items = parseItems(obj.value("Items").toArray());
+    const int total = obj.value("TotalRecordCount").toInt(items.size());
+    emit itemsLoaded(parentId, items, total);
+}
+
+void JellyfinClient::fetchUserViews() {
+    QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Views"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit networkError(reply->errorString());
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        emit viewsLoaded(parseItems(doc.object().value("Items").toArray()));
+    });
+}
+
+void JellyfinClient::fetchItems(const QString& parentId, const QString& includeItemTypes,
+                                bool recursive, const QString& sortBy,
+                                const QString& nameStartsWith,
+                                int startIndex, int limit) {
+    QList<QPair<QString,QString>> q = {
+        {"ParentId", parentId},
+        {"Fields", "PrimaryImageAspectRatio,UserData,SeriesPrimaryImageTag"},
+        {"SortBy", sortBy},
+        {"SortOrder", "Ascending"},
+        {"ImageTypeLimit", "1"},
+    };
+    if (!includeItemTypes.isEmpty())
+        q.append(QPair<QString,QString>{"IncludeItemTypes", includeItemTypes});
+    if (recursive)
+        q.append(QPair<QString,QString>{"Recursive", "true"});
+    if (!nameStartsWith.isEmpty())
+        q.append(QPair<QString,QString>{"NameStartsWith", nameStartsWith});
+    if (startIndex > 0)
+        q.append(QPair<QString,QString>{"StartIndex", QString::number(startIndex)});
+    if (limit > 0)
+        q.append(QPair<QString,QString>{"Limit", QString::number(limit)});
+    QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Items", q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, parentId]() {
+        handleItemsReply(reply, parentId);
+    });
+}
+
+void JellyfinClient::fetchResume() {
+    QList<QPair<QString,QString>> q = {
+        {"Limit", "24"},
+        {"Fields", "PrimaryImageAspectRatio,UserData,SeriesPrimaryImageTag"},
+        {"MediaTypes", "Video"},
+        {"ImageTypeLimit", "1"},
+    };
+    QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Items/Resume", q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit networkError(reply->errorString());
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        emit resumeLoaded(parseItems(doc.object().value("Items").toArray()));
+    });
+}
+
+void JellyfinClient::fetchLatest(const QString& parentId,
+                                 const QString& includeItemTypes, int limit) {
+    QList<QPair<QString,QString>> q = {
+        {"ParentId", parentId},
+        {"Limit", QString::number(limit)},
+        {"Fields", "PrimaryImageAspectRatio,UserData,SeriesPrimaryImageTag"},
+        {"ImageTypeLimit", "1"},
+    };
+    if (!includeItemTypes.isEmpty())
+        q.append(QPair<QString,QString>{"IncludeItemTypes", includeItemTypes});
+    QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Items/Latest", q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, parentId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit networkError(reply->errorString());
+            return;
+        }
+        // /Items/Latest returns a JSON array directly, not wrapped in {Items: [...]}.
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        emit latestLoaded(parentId, parseItems(doc.array()));
+    });
+}
+
+void JellyfinClient::fetchEpisodes(const QString& seriesId) {
+    QList<QPair<QString,QString>> q = {
+        {"UserId", m_userId},
+        {"Fields", "PrimaryImageAspectRatio,UserData,SeriesPrimaryImageTag,Overview"},
+        {"SortBy", "ParentIndexNumber,IndexNumber"},
+        {"SortOrder", "Ascending"},
+        {"ImageTypeLimit", "1"},
+    };
+    QNetworkReply* reply = m_nam.get(makeRequest("/Shows/" + seriesId + "/Episodes", q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, seriesId]() {
+        handleItemsReply(reply, seriesId);
+    });
+}
+
+QUrl JellyfinClient::imageUrl(const QString& itemId, const QString& tag,
+                              const QString& type, int maxHeight) const {
+    QUrl u = m_server;
+    QString base = u.path();
+    if (base.endsWith('/')) base.chop(1);
+    u.setPath(base + "/Items/" + itemId + "/Images/" + type);
+    QUrlQuery q;
+    if (!tag.isEmpty()) q.addQueryItem("tag", tag);
+    q.addQueryItem("maxHeight", QString::number(maxHeight));
+    q.addQueryItem("quality", "90");
+    u.setQuery(q);
+    return u;
+}
+
+QUrl JellyfinClient::streamUrl(const QString& itemId) const {
+    QUrl u = m_server;
+    QString base = u.path();
+    if (base.endsWith('/')) base.chop(1);
+    u.setPath(base + "/Videos/" + itemId + "/stream");
+    QUrlQuery q;
+    q.addQueryItem("static", "true");
+    q.addQueryItem("api_key", m_token);
+    q.addQueryItem("DeviceId", m_deviceId);
+    u.setQuery(q);
+    return u;
+}
+
+void JellyfinClient::fetchItemDetails(const QString& itemId) {
+    QList<QPair<QString,QString>> q = {
+        {"Fields", "Overview,People,Genres,Studios,Tags,OfficialRating,"
+                   "CommunityRating,UserData,BackdropImageTags,SeriesPrimaryImageTag"},
+    };
+    QNetworkReply* reply = m_nam.get(makeRequest("/Users/" + m_userId + "/Items/" + itemId, q));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit networkError(reply->errorString());
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(reply->readAll());
+        emit itemDetailsLoaded(parseSingleItem(doc.object()));
+    });
+}
+
+void JellyfinClient::setFavorite(const QString& itemId, bool favorite) {
+    QNetworkRequest req = makeRequest("/Users/" + m_userId + "/FavoriteItems/" + itemId);
+    QNetworkReply* reply = favorite
+        ? m_nam.post(req, QByteArray())
+        : m_nam.deleteResource(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId, favorite]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit networkError(reply->errorString());
+            return;
+        }
+        emit favoriteToggled(itemId, favorite);
+    });
+}
+
+void JellyfinClient::setPlayed(const QString& itemId, bool played) {
+    QNetworkRequest req = makeRequest("/Users/" + m_userId + "/PlayedItems/" + itemId);
+    QNetworkReply* reply = played
+        ? m_nam.post(req, QByteArray())
+        : m_nam.deleteResource(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId, played]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit networkError(reply->errorString());
+            return;
+        }
+        emit playedToggled(itemId, played);
+    });
+}
+
+void JellyfinClient::reportPlaybackStart(const QString& itemId, qint64 positionTicks) {
+    QJsonObject body;
+    body["ItemId"] = itemId;
+    body["PositionTicks"] = (double) positionTicks;
+    body["PlayMethod"] = "DirectStream";
+    body["CanSeek"] = true;
+    QNetworkRequest req = makeRequest("/Sessions/Playing");
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void JellyfinClient::reportPlaybackProgress(const QString& itemId, qint64 positionTicks, bool paused) {
+    QJsonObject body;
+    body["ItemId"] = itemId;
+    body["PositionTicks"] = (double) positionTicks;
+    body["IsPaused"] = paused;
+    body["PlayMethod"] = "DirectStream";
+    body["EventName"] = "TimeUpdate";
+    QNetworkRequest req = makeRequest("/Sessions/Playing/Progress");
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void JellyfinClient::reportPlaybackStopped(const QString& itemId, qint64 positionTicks) {
+    QJsonObject body;
+    body["ItemId"] = itemId;
+    body["PositionTicks"] = (double) positionTicks;
+    QNetworkRequest req = makeRequest("/Sessions/Playing/Stopped");
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
