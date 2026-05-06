@@ -1,4 +1,5 @@
 #include "MediaRow.h"
+#include "PlayEmblemDelegate.h"
 
 #include <QEvent>
 #include <QHBoxLayout>
@@ -17,16 +18,17 @@ constexpr int BackdropIconW = 280;
 constexpr int BackdropIconH = 158;       // ~16:9
 constexpr int LabelLines = 2;
 constexpr int Spacing = 12;
-constexpr int PlayEmblemSize = 36;
-constexpr int PlayEmblemMargin = 8;
 
 bool clickHitsPlayEmblem(const QPoint& posInViewport, const QRect& cellRect,
                          const QSize& iconSize) {
     const int ix = cellRect.x() + (cellRect.width() - iconSize.width()) / 2;
-    const int iy = cellRect.y() + 4;
-    const QRect emblem(ix + iconSize.width() - PlayEmblemMargin - PlayEmblemSize,
-                       iy + iconSize.height() - PlayEmblemMargin - PlayEmblemSize,
-                       PlayEmblemSize, PlayEmblemSize);
+    const int iy = cellRect.y() + PlayEmblemDelegate::IconTopGap;
+    const QRect emblem(
+        ix + iconSize.width() - PlayEmblemDelegate::Margin
+            - PlayEmblemDelegate::Size,
+        iy + iconSize.height() - PlayEmblemDelegate::Margin
+            - PlayEmblemDelegate::Size,
+        PlayEmblemDelegate::Size, PlayEmblemDelegate::Size);
     return emblem.contains(posInViewport);
 }
 }
@@ -59,6 +61,9 @@ MediaRow::MediaRow(const QString& sectionId, const QString& title,
     header->addWidget(m_seeAll);
 
     m_list = new QListWidget(this);
+    m_list->setItemDelegate(new PlayEmblemDelegate(m_list));
+    m_list->setMouseTracking(true);
+    m_list->viewport()->setAttribute(Qt::WA_Hover, true);
     m_list->setViewMode(QListView::IconMode);
     m_list->setFlow(QListView::LeftToRight);
     m_list->setWrapping(false);
@@ -158,6 +163,7 @@ void MediaRow::setItems(const QList<JellyfinItem>& items) {
 
         auto* w = new QListWidgetItem(placeholder, label);
         w->setData(Qt::UserRole, it.id);
+        w->setData(PlayEmblemDelegate::PlayableRole, it.playable());
         w->setTextAlignment(Qt::AlignHCenter);
         m_list->addItem(w);
         m_byId.insert(it.id, w);

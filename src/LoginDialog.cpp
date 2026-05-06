@@ -1,4 +1,5 @@
 #include "LoginDialog.h"
+#include "AccountStore.h"
 #include "JellyfinClient.h"
 
 #include <QFormLayout>
@@ -68,11 +69,29 @@ void LoginDialog::onAccept() {
 }
 
 void LoginDialog::onAuthenticated() {
-    QSettings s;
-    s.setValue("server", m_client->server().toString());
-    s.setValue("username", m_user->text());
-    s.setValue("userId", m_client->userId());
-    s.setValue("token", m_client->accessToken());
+    auto& store = AccountStore::instance();
+    // Reuse an existing server entry when the URL already matches; otherwise
+    // register a fresh one. The hostname is a serviceable default name and
+    // can be edited later in Settings.
+    QString serverId;
+    for (const auto& s : store.servers()) {
+        if (s.url == m_client->server()) { serverId = s.id; break; }
+    }
+    if (serverId.isEmpty())
+        serverId = store.addServer(m_client->server().host(),
+                                   m_client->server());
+
+    AccountEntry a;
+    a.serverId = serverId;
+    a.username = m_user->text();
+    a.userId = m_client->userId();
+    a.token = m_client->accessToken();
+    const QString accId = store.addAccount(a);
+    store.setCurrentAccountId(accId);
+
+    // Keep the username key around so the prefill in the next LoginDialog
+    // still works the way it used to.
+    QSettings().setValue(QStringLiteral("username"), m_user->text());
     accept();
 }
 

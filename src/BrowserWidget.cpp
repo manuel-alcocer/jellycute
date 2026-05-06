@@ -1,6 +1,7 @@
 #include "BrowserWidget.h"
 #include "DetailPage.h"
 #include "MediaRow.h"
+#include "PlayEmblemDelegate.h"
 
 #include <QApplication>
 #include <QDir>
@@ -55,29 +56,7 @@ QIcon makePlaceholder(const QSize& s) {
     return QIcon(pm);
 }
 
-constexpr int PlayEmblemSize = 36;
-constexpr int PlayEmblemMargin = 8;
-
-void drawPlayEmblem(QPainter& p, const QRect& iconArea) {
-    const QRect r(iconArea.right() - PlayEmblemMargin - PlayEmblemSize,
-                  iconArea.bottom() - PlayEmblemMargin - PlayEmblemSize,
-                  PlayEmblemSize, PlayEmblemSize);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setBrush(QColor(0, 0, 0, 170));
-    p.setPen(Qt::NoPen);
-    p.drawEllipse(r);
-    QPolygon tri;
-    const int cx = r.center().x();
-    const int cy = r.center().y();
-    const int s = PlayEmblemSize / 4;
-    tri << QPoint(cx - s + 2, cy - s)
-        << QPoint(cx - s + 2, cy + s)
-        << QPoint(cx + s + 2, cy);
-    p.setBrush(Qt::white);
-    p.drawPolygon(tri);
-}
-
-QIcon iconFromPixmap(const QPixmap& pm, const QSize& target, bool playable = false) {
+QIcon iconFromPixmap(const QPixmap& pm, const QSize& target) {
     QPixmap scaled = pm.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     QPixmap canvas(target);
     canvas.fill(Qt::transparent);
@@ -85,7 +64,6 @@ QIcon iconFromPixmap(const QPixmap& pm, const QSize& target, bool playable = fal
     const int x = (target.width() - scaled.width()) / 2;
     const int y = (target.height() - scaled.height()) / 2;
     p.drawPixmap(x, y, scaled);
-    if (playable) drawPlayEmblem(p, QRect(QPoint(0, 0), target));
     p.end();
     return QIcon(canvas);
 }
@@ -94,10 +72,13 @@ bool clickHitsPlayEmblem(const QPoint& posInViewport, const QRect& cellRect,
                          const QSize& iconSize) {
     // Icon is centered horizontally at the top of the cell.
     const int ix = cellRect.x() + (cellRect.width() - iconSize.width()) / 2;
-    const int iy = cellRect.y() + 4;
-    const QRect emblem(ix + iconSize.width() - PlayEmblemMargin - PlayEmblemSize,
-                       iy + iconSize.height() - PlayEmblemMargin - PlayEmblemSize,
-                       PlayEmblemSize, PlayEmblemSize);
+    const int iy = cellRect.y() + PlayEmblemDelegate::IconTopGap;
+    const QRect emblem(
+        ix + iconSize.width() - PlayEmblemDelegate::Margin
+            - PlayEmblemDelegate::Size,
+        iy + iconSize.height() - PlayEmblemDelegate::Margin
+            - PlayEmblemDelegate::Size,
+        PlayEmblemDelegate::Size, PlayEmblemDelegate::Size);
     return emblem.contains(posInViewport);
 }
 }
@@ -253,6 +234,9 @@ void BrowserWidget::buildGridPage() {
     cardLayout->setSpacing(0);
 
     m_grid = new CenterableList(m_gridCard);
+    m_grid->setItemDelegate(new PlayEmblemDelegate(/*twoLineCaption=*/true, m_grid));
+    m_grid->setMouseTracking(true);
+    m_grid->viewport()->setAttribute(Qt::WA_Hover, true);
     m_grid->setViewMode(QListView::IconMode);
     m_grid->setIconSize(QSize(GridIconW, GridIconH));
     m_grid->setGridSize(QSize(GridCellW, GridCellH));
@@ -864,22 +848,25 @@ void BrowserWidget::populateGrid(const QList<JellyfinItem>& items) {
     m_grid->clear();
     ++m_frameGen;
     for (const auto& it : items) {
-        QString label = it.name;
+        QString title = it.name;
         if (it.type == "Episode" && it.parentIndexNumber > 0 && it.indexNumber > 0) {
-            label = QString("S%1E%2 — %3")
+            title = QString("S%1E%2 — %3")
                         .arg(it.parentIndexNumber, 2, 10, QChar('0'))
                         .arg(it.indexNumber, 2, 10, QChar('0'))
                         .arg(it.name);
-        } else if (it.productionYear > 0 && it.type == "Movie") {
-            label = QString("%1 (%2)").arg(it.name).arg(it.productionYear);
         }
-        auto* w = new QListWidgetItem(m_placeholder, label);
+        const QString year = it.productionYear > 0
+                                 ? QString::number(it.productionYear)
+                                 : QString();
+        auto* w = new QListWidgetItem(m_placeholder, title);
         w->setData(Qt::UserRole + 1, it.id);
         w->setData(Qt::UserRole + 2, it.type);
         w->setData(Qt::UserRole + 3, it.isFolder);
         w->setData(Qt::UserRole + 4, it.seriesId);
         w->setData(Qt::UserRole + 5, (qlonglong) it.resumePositionTicks);
         w->setData(Qt::UserRole + 6, (qlonglong) it.runTimeTicks);
+        w->setData(PlayEmblemDelegate::PlayableRole, it.playable());
+        w->setData(PlayEmblemDelegate::YearRole, year);
         w->setTextAlignment(Qt::AlignHCenter);
         m_grid->addItem(w);
         fetchPoster(w, it, QSize(GridIconW, GridIconH), /*useBackdrop=*/false);
@@ -1006,14 +993,13 @@ void BrowserWidget::fetchPoster(QListWidgetItem* w, const JellyfinItem& it,
     QNetworkReply* reply = m_imgNam->get(req);
     const quint64 gen = m_frameGen;
     const QString itemId = it.id;
-    const bool playable = it.playable();
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, w, gen, cacheKey, iconSize, itemId, useBackdrop, playable]() {
+            [this, reply, w, gen, cacheKey, iconSize, itemId, useBackdrop]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) return;
         QPixmap pm;
         if (!pm.loadFromData(reply->readAll())) return;
-        const QIcon icon = iconFromPixmap(pm, iconSize, playable);
+        const QIcon icon = iconFromPixmap(pm, iconSize);
         QPixmapCache::insert(cacheKey, pm.scaled(iconSize, Qt::KeepAspectRatio,
                                                  Qt::SmoothTransformation));
         if (w) {

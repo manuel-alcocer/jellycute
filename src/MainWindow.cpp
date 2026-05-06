@@ -1,24 +1,29 @@
 #include "MainWindow.h"
+#include "AccountStore.h"
 #include "BrowserWidget.h"
 #include "LoginDialog.h"
 #include "MpvWidget.h"
 #include "SettingsDialog.h"
+#include "Theme.h"
 
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QFontDatabase>
 #include <QFontMetrics>
+#include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPropertyAnimation>
+#include <QtMath>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSettings>
 #include <QSlider>
 #include <QStackedWidget>
@@ -35,14 +40,32 @@ constexpr qint64 TICKS_PER_SECOND = 10'000'000LL;
 
 // Monochrome line-art icons rendered with QPainter so the look stays
 // consistent regardless of the system icon theme.
-QIcon makeIcon(int size, std::function<void(QPainter&)> draw) {
+// Recolours an existing QPainter-drawn icon by SourceIn-compositing a flat
+// fill over its alpha mask. Lets us reuse the dark icons as a light-tinted
+// variant when the control bar overlays the video.
+QIcon tintedIcon(const QIcon& src, QColor color, int size = 24) {
+    QPixmap pm = src.pixmap(QSize(size, size));
+    if (pm.isNull()) return src;
+    QPixmap out(pm.size());
+    out.setDevicePixelRatio(pm.devicePixelRatio());
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.drawPixmap(0, 0, pm);
+    p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    p.fillRect(QRect(0, 0, size, size), color);
+    p.end();
+    return QIcon(out);
+}
+
+QIcon makeIcon(int size, std::function<void(QPainter&)> draw,
+               QColor color = Theme::foregroundColor()) {
     const qreal dpr = qApp->devicePixelRatio();
     QPixmap pm(int(size * dpr), int(size * dpr));
     pm.setDevicePixelRatio(dpr);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
-    QPen pen(QColor("#232629"));
+    QPen pen(color);
     pen.setWidthF(1.5);
     pen.setJoinStyle(Qt::RoundJoin);
     pen.setCapStyle(Qt::RoundCap);
@@ -110,7 +133,7 @@ QIcon iconOsc() {
 }
 QIcon iconPlay() {
     return makeIcon(24, [](QPainter& p) {
-        p.setBrush(QColor("#232629"));
+        p.setBrush(p.pen().color());
         QPolygonF tri;
         tri << QPointF(7, 5) << QPointF(7, 19) << QPointF(19, 12);
         p.drawPolygon(tri);
@@ -118,14 +141,14 @@ QIcon iconPlay() {
 }
 QIcon iconPause() {
     return makeIcon(24, [](QPainter& p) {
-        p.setBrush(QColor("#232629"));
+        p.setBrush(p.pen().color());
         p.drawRoundedRect(QRectF(7, 5, 3.5, 14), 1, 1);
         p.drawRoundedRect(QRectF(13.5, 5, 3.5, 14), 1, 1);
     });
 }
 QIcon iconSeekBack() {
     return makeIcon(24, [](QPainter& p) {
-        p.setBrush(QColor("#232629"));
+        p.setBrush(p.pen().color());
         QPolygonF t1; t1 << QPointF(11, 6) << QPointF(11, 18) << QPointF(4, 12);
         QPolygonF t2; t2 << QPointF(20, 6) << QPointF(20, 18) << QPointF(13, 12);
         p.drawPolygon(t1); p.drawPolygon(t2);
@@ -133,7 +156,7 @@ QIcon iconSeekBack() {
 }
 QIcon iconSeekFwd() {
     return makeIcon(24, [](QPainter& p) {
-        p.setBrush(QColor("#232629"));
+        p.setBrush(p.pen().color());
         QPolygonF t1; t1 << QPointF(4, 6) << QPointF(4, 18) << QPointF(11, 12);
         QPolygonF t2; t2 << QPointF(13, 6) << QPointF(13, 18) << QPointF(20, 12);
         p.drawPolygon(t1); p.drawPolygon(t2);
@@ -169,6 +192,28 @@ QIcon iconVolume() {
         p.drawPath(w);
     });
 }
+QIcon iconAutoHide() {
+    // A pushpin: filled head + needle below. The button's :checked styling
+    // (sunken/blue) communicates that the auto-hide mode is active.
+    return makeIcon(24, [](QPainter& p) {
+        p.setBrush(p.pen().color());
+        QPainterPath head;
+        head.moveTo(8, 4);
+        head.lineTo(16, 4);
+        head.lineTo(15, 9);
+        head.lineTo(17, 9);
+        head.lineTo(17, 12);
+        head.lineTo(7, 12);
+        head.lineTo(7, 9);
+        head.lineTo(9, 9);
+        head.closeSubpath();
+        p.drawPath(head);
+        QPen pen = p.pen();
+        pen.setWidthF(2.0);
+        p.setPen(pen);
+        p.drawLine(QPointF(12, 12), QPointF(12, 20));
+    });
+}
 QIcon iconAspect() {
     return makeIcon(24, [](QPainter& p) {
         p.drawRoundedRect(QRectF(2.5, 5, 19, 14), 1.5, 1.5);
@@ -180,18 +225,25 @@ QIcon iconAspect() {
     });
 }
 QIcon iconSettings() {
-    // Three sliders: line + knob marker per row.
+    // Line-art gear: 8-tooth cog outline + small concentric hole. Built as
+    // a star polygon (16 alternating outer/inner vertices) stroked without
+    // fill so it matches the rest of the toolbar's line-art icons.
     return makeIcon(24, [](QPainter& p) {
-        p.setBrush(QColor("#fcfcfc"));
-        p.drawLine(QPointF(3, 7),  QPointF(8, 7));
-        p.drawLine(QPointF(13, 7), QPointF(21, 7));
-        p.drawEllipse(QPointF(10.5, 7), 2.5, 2.5);
-        p.drawLine(QPointF(3, 12),  QPointF(15, 12));
-        p.drawLine(QPointF(20, 12), QPointF(21, 12));
-        p.drawEllipse(QPointF(17.5, 12), 2.5, 2.5);
-        p.drawLine(QPointF(3, 17),  QPointF(11, 17));
-        p.drawLine(QPointF(16, 17), QPointF(21, 17));
-        p.drawEllipse(QPointF(13.5, 17), 2.5, 2.5);
+        const QPointF c(12, 12);
+        constexpr int teeth = 8;
+        constexpr qreal rOuter = 10.8;
+        constexpr qreal rInner = 7.6;
+        QPolygonF poly;
+        for (int i = 0; i < teeth * 2; ++i) {
+            const qreal angle =
+                qDegreesToRadians(-90.0 + i * (180.0 / teeth));
+            const qreal r = (i % 2 == 0) ? rOuter : rInner;
+            poly << QPointF(c.x() + r * qCos(angle),
+                            c.y() + r * qSin(angle));
+        }
+        p.setBrush(Qt::NoBrush);
+        p.drawPolygon(poly);
+        p.drawEllipse(c, 3.4, 3.4);
     });
 }
 QIcon iconExit() {
@@ -302,7 +354,10 @@ MainWindow::MainWindow(JellyfinClient* client, QWidget* parent)
         if (m_durLabel) m_durLabel->setText(hms(d));
     });
     connect(m_player, &MpvWidget::pausedChanged, this, [this](bool p) {
-        if (m_playPauseBtn) m_playPauseBtn->setIcon(p ? iconPlay() : iconPause());
+        if (!m_playPauseBtn) return;
+        QIcon icon = p ? iconPlay() : iconPause();
+        if (m_autoHideEnabled) icon = tintedIcon(icon, QColor("#eff0f1"));
+        m_playPauseBtn->setIcon(icon);
     });
     connect(m_player, &MpvWidget::tracksChanged, this, &MainWindow::rebuildTrackMenus);
     connect(m_player, &MpvWidget::volumeChanged, this, [this](int v) {
@@ -316,11 +371,21 @@ MainWindow::MainWindow(JellyfinClient* client, QWidget* parent)
     connect(m_player, &MpvWidget::fullscreenExitRequested,
             this, &MainWindow::exitFullscreen);
     connect(m_progressTimer, &QTimer::timeout, this, &MainWindow::reportProgressTick);
+    connect(m_client, &JellyfinClient::playbackResolved,
+            this, &MainWindow::onPlaybackResolved);
+    connect(m_client, &JellyfinClient::playbackResolveFailed,
+            this, &MainWindow::onPlaybackResolveFailed);
 
     // No menu bar: all configuration is reachable from the toolbar's
     // settings dialog.
     setMenuBar(nullptr);
     buildToolBar();
+
+    // Restore the auto-hide preference. setChecked() emits toggled which
+    // routes through setAutoHideEnabled and applies the overlay layout.
+    const bool autoHide = QSettings()
+        .value(QStringLiteral("autoHideControls"), false).toBool();
+    if (autoHide && m_autoHideBtn) m_autoHideBtn->setChecked(true);
 
     m_browser->start();
     statusBar()->showMessage(tr("Conectado a %1").arg(client->server().toString()));
@@ -334,13 +399,23 @@ void MainWindow::buildToolBar() {
     m_toolBar->setToolButtonStyle(Qt::ToolButtonIconOnly);
     addToolBar(Qt::TopToolBarArea, m_toolBar);
 
-    auto* sidebarAct = m_toolBar->addAction(iconSidebar(),
-                                            tr("Ocultar/mostrar sidebar"));
+    // Each toolbar action is paired with the icon factory that produced it
+    // so refreshThemedIcons() can rebuild the pixmap with the new theme
+    // colour without rebuilding the toolbar itself.
+    auto track = [this](QAction* act, std::function<QIcon()> make) {
+        m_iconRefreshers << [act, make]() { act->setIcon(make()); };
+        return act;
+    };
+
+    auto* sidebarAct = track(
+        m_toolBar->addAction(iconSidebar(), tr("Ocultar/mostrar sidebar")),
+        &iconSidebar);
     connect(sidebarAct, &QAction::triggered, this, [this]() {
         m_browser->setSidebarVisible(!m_browser->isSidebarVisible());
     });
 
-    auto* backAct = m_toolBar->addAction(iconBack(), tr("Atrás"));
+    auto* backAct = track(m_toolBar->addAction(iconBack(), tr("Atrás")),
+                          &iconBack);
     connect(backAct, &QAction::triggered, this, [this]() {
         // From the player → stop and go back to the browser. Otherwise pop
         // one breadcrumb level inside the browser.
@@ -352,16 +427,24 @@ void MainWindow::buildToolBar() {
 
     m_toolBar->addSeparator();
 
-    auto* changeUserAct = m_toolBar->addAction(iconUsers(), tr("Cambiar usuario"));
-    connect(changeUserAct, &QAction::triggered, this, &MainWindow::changeUser);
+    // User account picker. The button stays in the toolbar; its drop-down
+    // is rebuilt every time it opens so newly added/removed accounts show
+    // up without any explicit refresh wiring.
+    m_userBtn = new QToolButton(m_toolBar);
+    m_userBtn->setIcon(iconUsers());
+    m_userBtn->setToolTip(tr("Cuenta activa"));
+    m_userBtn->setAutoRaise(true);
+    m_userBtn->setPopupMode(QToolButton::InstantPopup);
+    m_accountsMenu = new QMenu(m_userBtn);
+    m_userBtn->setMenu(m_accountsMenu);
+    connect(m_accountsMenu, &QMenu::aboutToShow, this,
+            &MainWindow::rebuildAccountsMenu);
+    m_toolBar->addWidget(m_userBtn);
+    m_iconRefreshers << [this]() { m_userBtn->setIcon(iconUsers()); };
 
-    auto* logoutAct = m_toolBar->addAction(iconLogout(), tr("Cerrar sesión"));
-    connect(logoutAct, &QAction::triggered, this, [this]() {
-        QSettings s;
-        s.remove("token");
-        s.remove("userId");
-        close();
-    });
+    auto* logoutAct = track(
+        m_toolBar->addAction(iconLogout(), tr("Cerrar sesión")), &iconLogout);
+    connect(logoutAct, &QAction::triggered, this, [this]() { close(); });
 
     m_toolBar->addSeparator();
 
@@ -378,9 +461,12 @@ void MainWindow::buildToolBar() {
         if (on) m_player->setFocus();
     });
     m_toolBar->addAction(m_fullscreenAct);
+    track(m_fullscreenAct, &iconFullscreen);
 
-    m_oscToggleAct = m_toolBar->addAction(iconOsc(),
-                                          tr("Alternar OSC mpv / controles propios"));
+    m_oscToggleAct = track(
+        m_toolBar->addAction(iconOsc(),
+                             tr("Alternar OSC mpv / controles propios")),
+        &iconOsc);
     m_oscToggleAct->setCheckable(true);
     const bool useNativeOsc =
         QSettings().value(QStringLiteral("useNativeOsc"), true).toBool();
@@ -391,40 +477,53 @@ void MainWindow::buildToolBar() {
 
     m_toolBar->addSeparator();
 
-    auto* settingsAct = m_toolBar->addAction(iconSettings(), tr("Ajustes"));
+    auto* settingsAct = track(
+        m_toolBar->addAction(iconSettings(), tr("Ajustes")), &iconSettings);
     connect(settingsAct, &QAction::triggered, this, &MainWindow::openSettings);
 
-    auto* exitAct = m_toolBar->addAction(iconExit(), tr("Salir"));
+    auto* exitAct = track(m_toolBar->addAction(iconExit(), tr("Salir")),
+                          &iconExit);
     exitAct->setShortcut(QKeySequence::Quit);
     exitAct->setShortcutContext(Qt::ApplicationShortcut);
     connect(exitAct, &QAction::triggered, this, &QMainWindow::close);
 }
 
 void MainWindow::openSettings() {
+    const QString themeBefore = Theme::currentKey();
     SettingsDialog dlg(m_browser, m_player, this);
     dlg.exec();
+    if (Theme::currentKey() != themeBefore) {
+        Theme::apply();
+        refreshThemedIcons();
+    }
+}
+
+void MainWindow::refreshThemedIcons() {
+    for (const auto& f : m_iconRefreshers) f();
+    applyControlBarIcons();
 }
 
 void MainWindow::buildPlayerControlBar() {
     m_controlBar = new QWidget(m_playerPage);
+    m_controlBar->setObjectName(QStringLiteral("playerControlBar"));
     auto* cb = new QHBoxLayout(m_controlBar);
     cb->setContentsMargins(8, 4, 8, 8);
     cb->setSpacing(8);
 
-    auto* seekBack = new QToolButton(m_controlBar);
-    seekBack->setIcon(iconSeekBack());
-    seekBack->setToolTip(tr("Atrás 10s"));
-    seekBack->setAutoRaise(true);
+    m_seekBackBtn = new QToolButton(m_controlBar);
+    m_seekBackBtn->setIcon(iconSeekBack());
+    m_seekBackBtn->setToolTip(tr("Atrás 10s"));
+    m_seekBackBtn->setAutoRaise(true);
 
     m_playPauseBtn = new QToolButton(m_controlBar);
     m_playPauseBtn->setIcon(iconPause());
     m_playPauseBtn->setToolTip(tr("Reproducir / Pausa"));
     m_playPauseBtn->setAutoRaise(true);
 
-    auto* seekFwd = new QToolButton(m_controlBar);
-    seekFwd->setIcon(iconSeekFwd());
-    seekFwd->setToolTip(tr("Adelantar 10s"));
-    seekFwd->setAutoRaise(true);
+    m_seekFwdBtn = new QToolButton(m_controlBar);
+    m_seekFwdBtn->setIcon(iconSeekFwd());
+    m_seekFwdBtn->setToolTip(tr("Adelantar 10s"));
+    m_seekFwdBtn->setAutoRaise(true);
 
     m_positionSlider = new QSlider(Qt::Horizontal, m_controlBar);
     m_positionSlider->setRange(0, 0);
@@ -470,10 +569,10 @@ void MainWindow::buildPlayerControlBar() {
             slideUpPanel(m_subPanel);
     });
 
-    auto* volIcon = new QToolButton(m_controlBar);
-    volIcon->setIcon(iconVolume());
-    volIcon->setAutoRaise(true);
-    volIcon->setEnabled(false);   // pure indicator, no click action.
+    m_volumeIconBtn = new QToolButton(m_controlBar);
+    m_volumeIconBtn->setIcon(iconVolume());
+    m_volumeIconBtn->setAutoRaise(true);
+    m_volumeIconBtn->setEnabled(false);   // pure indicator, no click action.
 
     m_volumeSlider = new QSlider(Qt::Horizontal, m_controlBar);
     m_volumeSlider->setRange(0, 100);
@@ -482,6 +581,14 @@ void MainWindow::buildPlayerControlBar() {
     m_volumeSlider->setToolTip(tr("Volumen"));
     connect(m_volumeSlider, &QSlider::valueChanged, this,
             [this](int v) { m_player->setVolume(v); });
+
+    m_autoHideBtn = new QToolButton(m_controlBar);
+    m_autoHideBtn->setIcon(iconAutoHide());
+    m_autoHideBtn->setAutoRaise(true);
+    m_autoHideBtn->setCheckable(true);
+    m_autoHideBtn->setToolTip(tr("Auto-ocultar controles"));
+    connect(m_autoHideBtn, &QToolButton::toggled, this,
+            [this](bool on) { setAutoHideEnabled(on); });
 
     m_aspectBtn = new QToolButton(m_controlBar);
     m_aspectBtn->setIcon(iconAspect());
@@ -508,22 +615,23 @@ void MainWindow::buildPlayerControlBar() {
     }
     m_aspectBtn->setMenu(aspectMenu);
 
-    cb->addWidget(seekBack);
+    cb->addWidget(m_seekBackBtn);
     cb->addWidget(m_playPauseBtn);
-    cb->addWidget(seekFwd);
+    cb->addWidget(m_seekFwdBtn);
     cb->addWidget(m_positionSlider, 1);
-    cb->addWidget(volIcon);
+    cb->addWidget(m_volumeIconBtn);
     cb->addWidget(m_volumeSlider);
     cb->addWidget(m_audioBtn);
     cb->addWidget(m_subBtn);
     cb->addWidget(m_aspectBtn);
+    cb->addWidget(m_autoHideBtn);
     cb->addWidget(m_posLabel);
     cb->addWidget(sep);
     cb->addWidget(m_durLabel);
 
-    connect(seekBack, &QToolButton::clicked, this,
+    connect(m_seekBackBtn, &QToolButton::clicked, this,
             [this]() { m_player->seekRelative(-10); });
-    connect(seekFwd, &QToolButton::clicked, this,
+    connect(m_seekFwdBtn, &QToolButton::clicked, this,
             [this]() { m_player->seekRelative(+10); });
     connect(m_playPauseBtn, &QToolButton::clicked, this,
             [this]() { m_player->togglePause(); });
@@ -536,6 +644,27 @@ void MainWindow::buildPlayerControlBar() {
     connect(m_positionSlider, &QSlider::sliderMoved, this, [this](int v) {
         if (m_posLabel) m_posLabel->setText(hms(v));
     });
+
+    // Auto-hide infrastructure: opacity effect + fade animation + idle timer.
+    // The effect stays installed in both modes (its initial opacity is 1.0
+    // and inert until the fade animation drives it).
+    m_controlBarOpacity = new QGraphicsOpacityEffect(m_controlBar);
+    m_controlBarOpacity->setOpacity(1.0);
+    m_controlBar->setGraphicsEffect(m_controlBarOpacity);
+    m_controlBarFade = new QPropertyAnimation(m_controlBarOpacity, "opacity", this);
+    m_controlBarFade->setDuration(220);
+    m_controlBarFade->setEasingCurve(QEasingCurve::OutCubic);
+    connect(m_controlBarFade, &QPropertyAnimation::finished, this, [this]() {
+        // After fade-out the bar must stop receiving mouse events so mpv
+        // gets clicks/drags through the area it used to cover.
+        if (m_controlBarOpacity && m_controlBarOpacity->opacity() <= 0.01)
+            m_controlBar->setVisible(false);
+    });
+
+    m_autoHideTimer = new QTimer(this);
+    m_autoHideTimer->setSingleShot(true);
+    m_autoHideTimer->setInterval(2500);
+    connect(m_autoHideTimer, &QTimer::timeout, this, &MainWindow::hideControlBar);
 }
 
 static QFrame* makeTrackPanel(QWidget* parent, const QString& title,
@@ -682,9 +811,122 @@ void MainWindow::rebuildTrackMenus() {
 
 void MainWindow::applyOscMode(bool useNative) {
     if (m_player) m_player->setOscEnabled(useNative);
+    // Switching modes resets any in-flight auto-hide fade so the bar shows
+    // up fully opaque the next time custom controls become active.
+    if (m_controlBarFade) m_controlBarFade->stop();
+    if (m_controlBarOpacity) m_controlBarOpacity->setOpacity(1.0);
     if (m_controlBar) m_controlBar->setVisible(!useNative);
     if (m_oscToggleAct) m_oscToggleAct->setChecked(useNative);
     QSettings().setValue(QStringLiteral("useNativeOsc"), useNative);
+    if (!useNative && m_autoHideEnabled && m_autoHideTimer)
+        m_autoHideTimer->start();
+}
+
+void MainWindow::setAutoHideEnabled(bool on) {
+    if (m_autoHideEnabled == on) return;
+    m_autoHideEnabled = on;
+    QSettings().setValue(QStringLiteral("autoHideControls"), on);
+    if (m_autoHideBtn && m_autoHideBtn->isChecked() != on)
+        m_autoHideBtn->setChecked(on);
+
+    auto* layout = qobject_cast<QVBoxLayout*>(m_playerPage->layout());
+    if (!layout || !m_controlBar) return;
+
+    if (on) {
+        // Detach from layout and overlay on top of the video. Style gives the
+        // bar an opaque dark backdrop so its widgets stay readable above the
+        // moving video frame.
+        if (m_controlBarFade) m_controlBarFade->stop();
+        if (m_controlBarOpacity) m_controlBarOpacity->setOpacity(1.0);
+        layout->removeWidget(m_controlBar);
+        m_controlBar->setStyleSheet(QStringLiteral(
+            "QWidget#playerControlBar {"
+            "  background-color: rgba(40, 44, 50, 200);"
+            "  border-top: 1px solid rgba(255, 255, 255, 30);"
+            "}"));
+        m_controlBar->raise();
+        positionControlBarOverlay();
+        const bool nativeOsc = m_oscToggleAct && m_oscToggleAct->isChecked();
+        m_controlBar->setVisible(!nativeOsc);
+        if (!nativeOsc && m_autoHideTimer) m_autoHideTimer->start();
+    } else {
+        if (m_controlBarFade) m_controlBarFade->stop();
+        if (m_controlBarOpacity) m_controlBarOpacity->setOpacity(1.0);
+        m_controlBar->setStyleSheet(QString());
+        layout->addWidget(m_controlBar);
+        const bool nativeOsc = m_oscToggleAct && m_oscToggleAct->isChecked();
+        m_controlBar->setVisible(!nativeOsc);
+        if (m_autoHideTimer) m_autoHideTimer->stop();
+    }
+    applyControlBarIcons();
+}
+
+void MainWindow::positionControlBarOverlay() {
+    if (!m_autoHideEnabled || !m_controlBar || !m_playerPage) return;
+    const int w = m_playerPage->width();
+    const int h = m_controlBar->sizeHint().height();
+    m_controlBar->setGeometry(0, m_playerPage->height() - h, w, h);
+}
+
+void MainWindow::showControlBar() {
+    if (!m_autoHideEnabled || !m_controlBar || !m_controlBarOpacity) return;
+    if (m_oscToggleAct && m_oscToggleAct->isChecked()) return;
+    if (!m_controlBar->isVisible()) m_controlBar->setVisible(true);
+    m_controlBar->raise();
+    if (m_controlBarFade) {
+        m_controlBarFade->stop();
+        m_controlBarFade->setStartValue(m_controlBarOpacity->opacity());
+        m_controlBarFade->setEndValue(1.0);
+        m_controlBarFade->start();
+    }
+    if (m_autoHideTimer) m_autoHideTimer->start();
+}
+
+void MainWindow::hideControlBar() {
+    if (!m_autoHideEnabled || !m_controlBar || !m_controlBarOpacity) return;
+    if (!m_controlBar->isVisible()) return;
+    // Postpone the hide while the cursor is still resting over the bar —
+    // child widgets without mouse tracking don't deliver MouseMove, so we
+    // recheck position here instead of relying on continuous events.
+    const QRect rect(m_controlBar->mapToGlobal(QPoint(0, 0)),
+                     m_controlBar->size());
+    if (rect.contains(QCursor::pos())) {
+        if (m_autoHideTimer) m_autoHideTimer->start();
+        return;
+    }
+    if (m_controlBarFade) {
+        m_controlBarFade->stop();
+        m_controlBarFade->setStartValue(m_controlBarOpacity->opacity());
+        m_controlBarFade->setEndValue(0.0);
+        m_controlBarFade->start();
+    }
+}
+
+void MainWindow::applyControlBarIcons() {
+    auto themed = [this](QIcon dark) {
+        if (!m_autoHideEnabled) return dark;
+        return tintedIcon(dark, QColor("#eff0f1"));
+    };
+    if (m_seekBackBtn) m_seekBackBtn->setIcon(themed(iconSeekBack()));
+    if (m_seekFwdBtn)  m_seekFwdBtn->setIcon(themed(iconSeekFwd()));
+    if (m_volumeIconBtn) m_volumeIconBtn->setIcon(themed(iconVolume()));
+    if (m_audioBtn)    m_audioBtn->setIcon(themed(iconAudio()));
+    if (m_subBtn)      m_subBtn->setIcon(themed(iconSubs()));
+    if (m_aspectBtn)   m_aspectBtn->setIcon(themed(iconAspect()));
+    if (m_autoHideBtn) m_autoHideBtn->setIcon(themed(iconAutoHide()));
+    if (m_playPauseBtn && m_player)
+        m_playPauseBtn->setIcon(themed(m_player->isPaused() ? iconPlay()
+                                                            : iconPause()));
+}
+
+bool MainWindow::isInControlBarTree(QObject* w) const {
+    if (!m_controlBar) return false;
+    QWidget* c = qobject_cast<QWidget*>(w);
+    while (c) {
+        if (c == m_controlBar) return true;
+        c = c->parentWidget();
+    }
+    return false;
 }
 
 QString MainWindow::hms(qint64 s) {
@@ -695,23 +937,69 @@ QString MainWindow::hms(qint64 s) {
         .arg(s % 60, 2, 10, QChar('0'));
 }
 
-void MainWindow::changeUser() {
+void MainWindow::rebuildAccountsMenu() {
+    if (!m_accountsMenu) return;
+    m_accountsMenu->clear();
+    auto& store = AccountStore::instance();
+    const QString currentId = store.currentAccountId();
+    const auto accs = store.accounts();
+    if (accs.isEmpty()) {
+        auto* a = m_accountsMenu->addAction(tr("(sin cuentas)"));
+        a->setEnabled(false);
+    } else {
+        for (const auto& acc : accs) {
+            const ServerEntry srv = store.server(acc.serverId);
+            const QString srvLabel = srv.name.isEmpty() ? srv.url.host()
+                                                        : srv.name;
+            const QString text = srvLabel.isEmpty()
+                                     ? acc.username
+                                     : QStringLiteral("%1  ·  %2")
+                                           .arg(acc.username, srvLabel);
+            auto* a = m_accountsMenu->addAction(text);
+            a->setCheckable(true);
+            a->setChecked(acc.id == currentId);
+            const QString id = acc.id;
+            connect(a, &QAction::triggered, this,
+                    [this, id]() { switchToAccount(id); });
+        }
+    }
+    m_accountsMenu->addSeparator();
+    auto* manage = m_accountsMenu->addAction(tr("Gestionar cuentas…"));
+    connect(manage, &QAction::triggered, this, &MainWindow::openSettings);
+}
+
+void MainWindow::switchToAccount(const QString& accountId) {
+    auto& store = AccountStore::instance();
+    const AccountEntry acc = store.account(accountId);
+    if (acc.id.isEmpty()) return;
+    const ServerEntry srv = store.server(acc.serverId);
+    if (srv.id.isEmpty()) return;
+    if (acc.id == store.currentAccountId()) return;   // already active
+
+    // Stop any playback and report the final position before swapping the
+    // network identity, otherwise the report would land on the new server.
     if (m_playing && !m_currentItem.id.isEmpty()) {
         m_client->reportPlaybackStopped(
-            m_currentItem.id,
+            m_currentItem.id, m_currentPlayback,
             m_player->positionSeconds() * TICKS_PER_SECOND);
+        if (m_currentPlayback.method == JellyfinPlayback::Transcode)
+            m_client->stopActiveEncoding(m_currentPlayback.playSessionId);
         m_player->stop();
         m_playing = false;
         m_currentItem = {};
+        m_currentPlayback = {};
         m_progressTimer->stop();
+    }
+    if (m_stack && m_stack->currentWidget() == m_playerPage)
         m_stack->setCurrentWidget(m_browser);
-    }
-    LoginDialog dlg(m_client, this);
-    if (dlg.exec() == QDialog::Accepted) {
-        // LoginDialog already updated JellyfinClient credentials and saved
-        // them to QSettings; just refresh the views.
-        m_browser->start();
-    }
+
+    m_client->setServer(srv.url);
+    m_client->setCredentials(acc.userId, acc.token);
+    store.setCurrentAccountId(acc.id);
+    m_browser->start();
+    statusBar()->showMessage(
+        tr("Conectado a %1 como %2")
+            .arg(srv.name.isEmpty() ? srv.url.host() : srv.name, acc.username));
 }
 
 void MainWindow::toggleFullscreen() {
@@ -727,14 +1015,47 @@ void MainWindow::exitFullscreen() {
 
 void MainWindow::onPlayWithStart(const JellyfinItem& item, qint64 startTicks) {
     m_currentItem = item;
-    const qint64 startSeconds = startTicks / TICKS_PER_SECOND;
+    m_currentPlayback = {};
+    m_pendingStartTicks = startTicks;
     m_lastReportedPositionSeconds = -1;
+    // Negotiate with the server first; the actual mpv->play() happens once
+    // PlaybackInfo answers (see onPlaybackResolved).
+    statusBar()->showMessage(tr("Preparando reproducción…"));
+    m_client->resolvePlayback(item.id, startTicks);
+}
+
+void MainWindow::onPlaybackResolved(const QString& itemId,
+                                    const JellyfinPlayback& info) {
+    if (m_currentItem.id != itemId) return;   // stale resolution
+    m_currentPlayback = info;
+    const qint64 startSeconds = m_pendingStartTicks / TICKS_PER_SECOND;
     m_stack->setCurrentWidget(m_playerPage);
     m_player->setFocus();
     m_playing = true;
-    m_client->reportPlaybackStart(item.id, startTicks);
-    m_player->play(m_client->streamUrl(item.id).toString(), startSeconds);
+    m_client->reportPlaybackStart(itemId, info, m_pendingStartTicks);
+    m_player->play(info.url.toString(), startSeconds);
     m_progressTimer->start();
+    if (m_autoHideEnabled) {
+        positionControlBarOverlay();
+        showControlBar();
+    }
+    QString modeLabel;
+    switch (info.method) {
+        case JellyfinPlayback::DirectPlay:   modeLabel = tr("reproducción directa"); break;
+        case JellyfinPlayback::DirectStream: modeLabel = tr("remuxeo en servidor"); break;
+        case JellyfinPlayback::Transcode:    modeLabel = tr("transcodificación"); break;
+    }
+    statusBar()->showMessage(tr("Reproduciendo (%1)").arg(modeLabel));
+}
+
+void MainWindow::onPlaybackResolveFailed(const QString& itemId,
+                                          const QString& message) {
+    if (m_currentItem.id != itemId) return;
+    statusBar()->showMessage(
+        tr("No se pudo iniciar la reproducción: %1").arg(message));
+    m_playing = false;
+    m_currentItem = {};
+    m_currentPlayback = {};
 }
 
 
@@ -746,7 +1067,7 @@ void MainWindow::onMpvPaused(bool /*paused*/) {
     // Report immediately on pause/resume so the server reflects state.
     if (m_playing && !m_currentItem.id.isEmpty()) {
         m_client->reportPlaybackProgress(
-            m_currentItem.id,
+            m_currentItem.id, m_currentPlayback,
             m_player->positionSeconds() * TICKS_PER_SECOND,
             m_player->isPaused());
     }
@@ -755,7 +1076,7 @@ void MainWindow::onMpvPaused(bool /*paused*/) {
 void MainWindow::reportProgressTick() {
     if (!m_playing || m_currentItem.id.isEmpty()) return;
     m_client->reportPlaybackProgress(
-        m_currentItem.id,
+        m_currentItem.id, m_currentPlayback,
         m_player->positionSeconds() * TICKS_PER_SECOND,
         m_player->isPaused());
 }
@@ -771,13 +1092,17 @@ void MainWindow::onMpvEndReached() {
 void MainWindow::switchToBrowser() {
     if (m_playing && !m_currentItem.id.isEmpty()) {
         m_client->reportPlaybackStopped(
-            m_currentItem.id,
+            m_currentItem.id, m_currentPlayback,
             m_player->positionSeconds() * TICKS_PER_SECOND);
+        if (m_currentPlayback.method == JellyfinPlayback::Transcode)
+            m_client->stopActiveEncoding(m_currentPlayback.playSessionId);
     }
     m_player->stop();
     m_progressTimer->stop();
     m_playing = false;
     m_currentItem = {};
+    m_currentPlayback = {};
+    if (m_autoHideTimer) m_autoHideTimer->stop();
     m_stack->setCurrentWidget(m_browser);
     // Refresh the current view so updated resume positions / watched flags appear,
     // without losing the user's navigation stack.
@@ -785,7 +1110,34 @@ void MainWindow::switchToBrowser() {
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
-    Q_UNUSED(watched);
+    // Reposition the overlay when the player page resizes.
+    if (m_autoHideEnabled && watched == m_playerPage &&
+        event->type() == QEvent::Resize) {
+        positionControlBarOverlay();
+        return false;
+    }
+
+    // Drive the auto-hide animation from mouse activity while the player
+    // page is on top.
+    if (m_autoHideEnabled && event->type() == QEvent::MouseMove &&
+        m_stack && m_stack->currentWidget() == m_playerPage) {
+        if (isInControlBarTree(watched)) {
+            // Anything inside the bar (or its child widgets) keeps it shown.
+            showControlBar();
+        } else if (watched == m_player) {
+            auto* mev = static_cast<QMouseEvent*>(event);
+            const int yInPage = m_player->y() + int(mev->position().y());
+            const int distFromBottom = m_playerPage->height() - yInPage;
+            constexpr int kProximity = 80;
+            if (distFromBottom <= kProximity) {
+                showControlBar();
+            } else if (m_controlBar->isVisible() && m_autoHideTimer &&
+                       !m_autoHideTimer->isActive()) {
+                m_autoHideTimer->start();
+            }
+        }
+    }
+
     if (event->type() != QEvent::MouseButtonPress) return false;
     auto* me = static_cast<QMouseEvent*>(event);
     const QPoint gp = me->globalPosition().toPoint();
@@ -810,8 +1162,10 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 void MainWindow::closeEvent(QCloseEvent* e) {
     if (m_playing && !m_currentItem.id.isEmpty()) {
         m_client->reportPlaybackStopped(
-            m_currentItem.id,
+            m_currentItem.id, m_currentPlayback,
             m_player->positionSeconds() * TICKS_PER_SECOND);
+        if (m_currentPlayback.method == JellyfinPlayback::Transcode)
+            m_client->stopActiveEncoding(m_currentPlayback.playSessionId);
     }
     m_player->stop();
     e->accept();

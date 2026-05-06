@@ -21,6 +21,9 @@ add_executable(jellycute
     src/MediaRow.cpp
     src/MpvWidget.cpp
     src/SettingsDialog.cpp
+    src/Theme.cpp
+    src/AccountStore.cpp
+    src/ServerProbe.cpp
 )
 
 target_include_directories(jellycute PRIVATE src)

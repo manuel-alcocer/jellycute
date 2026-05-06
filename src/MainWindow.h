@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QList>
 #include <QMainWindow>
+#include <functional>
 #include "JellyfinClient.h"
 
 class QStackedWidget;
@@ -12,6 +14,9 @@ class QSlider;
 class QLabel;
 class QToolButton;
 class QFrame;
+class QGraphicsOpacityEffect;
+class QPropertyAnimation;
+class QVBoxLayout;
 class TimeDisplay;
 
 class MainWindow : public QMainWindow {
@@ -25,7 +30,10 @@ protected:
 
 private slots:
     void onPlayWithStart(const JellyfinItem& item, qint64 startTicks);
-    void changeUser();
+    void onPlaybackResolved(const QString& itemId, const JellyfinPlayback& info);
+    void onPlaybackResolveFailed(const QString& itemId, const QString& message);
+    void rebuildAccountsMenu();
+    void switchToAccount(const QString& accountId);
     void openSettings();
     void onMpvIdleChanged(bool idle);
     void onMpvEndReached();
@@ -39,6 +47,7 @@ private slots:
 public:
     void slideUpPanel(QFrame* panel);
     void slideDownPanel(QFrame* panel);
+    void refreshThemedIcons();
 
 private:
     void buildToolBar();
@@ -46,9 +55,17 @@ private:
     void applyOscMode(bool useNative);
     void rebuildTrackMenus();
     void buildTrackPanels();
+    void setAutoHideEnabled(bool on);
+    void showControlBar();
+    void hideControlBar();
+    void positionControlBarOverlay();
+    bool isInControlBarTree(QObject* w) const;
+    void applyControlBarIcons();
     static QString hms(qint64 seconds);
 
     JellyfinClient* m_client;
+    class QToolButton* m_userBtn = nullptr;
+    class QMenu* m_accountsMenu = nullptr;
     QStackedWidget* m_stack;
     BrowserWidget* m_browser;
     MpvWidget* m_player;
@@ -62,6 +79,10 @@ private:
     QToolButton* m_audioBtn = nullptr;
     QToolButton* m_subBtn = nullptr;
     QToolButton* m_aspectBtn = nullptr;
+    QToolButton* m_autoHideBtn = nullptr;
+    QToolButton* m_seekBackBtn = nullptr;
+    QToolButton* m_seekFwdBtn = nullptr;
+    QToolButton* m_volumeIconBtn = nullptr;
     QSlider* m_volumeSlider = nullptr;
     class QFrame* m_audioPanel = nullptr;
     class QFrame* m_subPanel = nullptr;
@@ -73,7 +94,19 @@ private:
     QAction* m_fullscreenAct = nullptr;
     class QToolBar* m_toolBar = nullptr;
 
+    bool m_autoHideEnabled = false;
+    QTimer* m_autoHideTimer = nullptr;
+    QGraphicsOpacityEffect* m_controlBarOpacity = nullptr;
+    QPropertyAnimation* m_controlBarFade = nullptr;
+
+    // Re-applies icons after a theme switch. Each entry is a closure that
+    // captures a (toolbar QAction* | toolbar button) and resets its icon
+    // using the theme's current foreground colour.
+    QList<std::function<void()>> m_iconRefreshers;
+
     JellyfinItem m_currentItem;
+    JellyfinPlayback m_currentPlayback;
+    qint64 m_pendingStartTicks = 0;
     bool m_playing = false;
     qint64 m_lastReportedPositionSeconds = -1;
 };

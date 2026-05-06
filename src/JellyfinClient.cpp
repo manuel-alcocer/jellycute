@@ -281,16 +281,212 @@ QUrl JellyfinClient::imageUrl(const QString& itemId, const QString& tag,
 }
 
 QUrl JellyfinClient::streamUrl(const QString& itemId) const {
+    return directPlayUrl(itemId, QString(), QString());
+}
+
+QUrl JellyfinClient::directPlayUrl(const QString& itemId,
+                                   const QString& mediaSourceId,
+                                   const QString& playSessionId) const {
     QUrl u = m_server;
     QString base = u.path();
     if (base.endsWith('/')) base.chop(1);
     u.setPath(base + "/Videos/" + itemId + "/stream");
     QUrlQuery q;
-    q.addQueryItem("static", "true");
+    q.addQueryItem("Static", "true");
+    if (!mediaSourceId.isEmpty()) q.addQueryItem("MediaSourceId", mediaSourceId);
     q.addQueryItem("api_key", m_token);
     q.addQueryItem("DeviceId", m_deviceId);
+    if (!playSessionId.isEmpty()) q.addQueryItem("PlaySessionId", playSessionId);
     u.setQuery(q);
     return u;
+}
+
+QUrl JellyfinClient::absoluteFromRelative(const QString& s) const {
+    // Some Jellyfin builds return absolute URLs in TranscodingUrl /
+    // DirectStreamUrl, others return server-relative paths. Anchor to
+    // m_server when relative; preserve any embedded query (api_key,
+    // PlaySessionId, codec params, …) verbatim.
+    if (s.startsWith("http://") || s.startsWith("https://")) return QUrl(s);
+    QUrl u = m_server;
+    QString basePath = u.path();
+    if (basePath.endsWith('/')) basePath.chop(1);
+    const int qIdx = s.indexOf('?');
+    const QString pathPart = qIdx >= 0 ? s.left(qIdx) : s;
+    const QString queryPart = qIdx >= 0 ? s.mid(qIdx + 1) : QString();
+    u.setPath(basePath + (pathPart.startsWith('/') ? pathPart
+                                                    : QStringLiteral("/") + pathPart));
+    if (!queryPart.isEmpty()) u.setQuery(queryPart);
+    return u;
+}
+
+namespace {
+// Permissive device profile: we let mpv attempt direct play for everything
+// reasonable, and only fall back to a single H.264/AAC HLS transcode when
+// the server insists.
+QJsonObject buildMpvDeviceProfile() {
+    auto videoDirect = [](const QString& container) {
+        QJsonObject o;
+        o["Container"] = container;
+        o["Type"] = "Video";
+        return o;
+    };
+    auto audioDirect = [](const QString& container) {
+        QJsonObject o;
+        o["Container"] = container;
+        o["Type"] = "Audio";
+        return o;
+    };
+    QJsonArray directPlay;
+    directPlay << videoDirect("mp4,m4v,mov,3gp,3g2");
+    directPlay << videoDirect("mkv,webm");
+    directPlay << videoDirect("ts,mpegts,m2ts,mts");
+    directPlay << videoDirect("avi,asf,wmv,flv,ogv,mxf,mpg,mpeg");
+    directPlay << audioDirect("mp3,m4a,mp4,aac,wav,flac,ogg,oga,opus,wma,ape,aiff");
+
+    QJsonArray transcoding;
+    {
+        QJsonObject o;
+        o["Container"] = "ts";
+        o["Type"] = "Video";
+        o["Protocol"] = "hls";
+        o["Context"] = "Streaming";
+        o["VideoCodec"] = "h264";
+        o["AudioCodec"] = "aac,mp3,ac3,eac3";
+        o["MaxAudioChannels"] = "6";
+        o["BreakOnNonKeyFrames"] = true;
+        transcoding << o;
+    }
+    {
+        QJsonObject o;
+        o["Container"] = "mp3";
+        o["Type"] = "Audio";
+        o["Protocol"] = "http";
+        o["AudioCodec"] = "mp3";
+        o["MaxAudioChannels"] = "2";
+        transcoding << o;
+    }
+
+    auto sub = [](const QString& fmt, const QString& method) {
+        QJsonObject o;
+        o["Format"] = fmt;
+        o["Method"] = method;
+        return o;
+    };
+    QJsonArray subtitles;
+    for (const QString& fmt : {"srt", "ass", "ssa", "vtt", "subrip", "smi",
+                               "sub", "idx"})
+        subtitles << sub(fmt, "External");
+    for (const QString& fmt : {"pgssub", "dvdsub", "dvbsub"})
+        subtitles << sub(fmt, "Embed");
+
+    QJsonObject profile;
+    profile["MaxStreamingBitrate"] = 200000000;
+    profile["MaxStaticBitrate"] = 200000000;
+    profile["MusicStreamingTranscodingBitrate"] = 320000;
+    profile["DirectPlayProfiles"] = directPlay;
+    profile["TranscodingProfiles"] = transcoding;
+    profile["ContainerProfiles"] = QJsonArray();
+    profile["CodecProfiles"] = QJsonArray();
+    profile["SubtitleProfiles"] = subtitles;
+    profile["ResponseProfiles"] = QJsonArray();
+    return profile;
+}
+
+QString playMethodString(JellyfinPlayback::Method m) {
+    switch (m) {
+        case JellyfinPlayback::DirectPlay:   return QStringLiteral("DirectPlay");
+        case JellyfinPlayback::DirectStream: return QStringLiteral("DirectStream");
+        case JellyfinPlayback::Transcode:    return QStringLiteral("Transcode");
+    }
+    return QStringLiteral("DirectPlay");
+}
+}
+
+void JellyfinClient::resolvePlayback(const QString& itemId, qint64 startTicks) {
+    QJsonObject body;
+    body["DeviceProfile"] = buildMpvDeviceProfile();
+    body["UserId"] = m_userId;
+    body["MaxStreamingBitrate"] = 200000000;
+    body["StartTimeTicks"] = (double) startTicks;
+    body["AutoOpenLiveStream"] = true;
+    body["EnableDirectPlay"] = true;
+    body["EnableDirectStream"] = true;
+    body["EnableTranscoding"] = true;
+    body["AllowVideoStreamCopy"] = true;
+    body["AllowAudioStreamCopy"] = true;
+
+    QNetworkRequest req = makeRequest(
+        QStringLiteral("/Items/") + itemId + QStringLiteral("/PlaybackInfo"));
+    QNetworkReply* reply = m_nam.post(req,
+        QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit playbackResolveFailed(itemId, reply->errorString());
+            return;
+        }
+        const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        if (!doc.isObject()) {
+            emit playbackResolveFailed(itemId, tr("Respuesta no JSON"));
+            return;
+        }
+        const QJsonObject obj = doc.object();
+        const QJsonArray sources = obj.value(QStringLiteral("MediaSources"))
+                                       .toArray();
+        if (sources.isEmpty()) {
+            emit playbackResolveFailed(itemId, tr("Sin MediaSources"));
+            return;
+        }
+        const QJsonObject src = sources.first().toObject();
+        JellyfinPlayback p;
+        p.playSessionId = obj.value(QStringLiteral("PlaySessionId")).toString();
+        p.mediaSourceId = src.value(QStringLiteral("Id")).toString();
+        p.container = src.value(QStringLiteral("Container")).toString();
+
+        const bool directPlay = src.value(QStringLiteral("SupportsDirectPlay"))
+                                    .toBool();
+        const bool directStream = src.value(QStringLiteral("SupportsDirectStream"))
+                                      .toBool();
+        const bool transcode = src.value(QStringLiteral("SupportsTranscoding"))
+                                   .toBool();
+        const QString transcodeUrl = src.value(QStringLiteral("TranscodingUrl"))
+                                        .toString();
+        const QString directStreamUrl = src.value(QStringLiteral("DirectStreamUrl"))
+                                            .toString();
+
+        if (directPlay) {
+            p.method = JellyfinPlayback::DirectPlay;
+            p.url = directPlayUrl(itemId, p.mediaSourceId, p.playSessionId);
+        } else if (directStream && !directStreamUrl.isEmpty()) {
+            p.method = JellyfinPlayback::DirectStream;
+            p.url = absoluteFromRelative(directStreamUrl);
+        } else if (transcode && !transcodeUrl.isEmpty()) {
+            p.method = JellyfinPlayback::Transcode;
+            p.url = absoluteFromRelative(transcodeUrl);
+        } else {
+            // Server gave us nothing usable — try direct play anyway. If the
+            // file actually plays, great; otherwise mpv surfaces the error.
+            p.method = JellyfinPlayback::DirectPlay;
+            p.url = directPlayUrl(itemId, p.mediaSourceId, p.playSessionId);
+        }
+        emit playbackResolved(itemId, p);
+    });
+}
+
+void JellyfinClient::stopActiveEncoding(const QString& playSessionId) {
+    if (playSessionId.isEmpty()) return;
+    QUrl u = m_server;
+    QString base = u.path();
+    if (base.endsWith('/')) base.chop(1);
+    u.setPath(base + QStringLiteral("/Videos/ActiveEncodings"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("DeviceId"), m_deviceId);
+    q.addQueryItem(QStringLiteral("PlaySessionId"), playSessionId);
+    u.setQuery(q);
+    QNetworkRequest req(u);
+    req.setRawHeader("X-Emby-Authorization", authHeader(true).toUtf8());
+    QNetworkReply* reply = m_nam.deleteResource(req);
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
 void JellyfinClient::fetchItemDetails(const QString& itemId) {
@@ -452,33 +648,46 @@ void JellyfinClient::setPlayed(const QString& itemId, bool played) {
     });
 }
 
-void JellyfinClient::reportPlaybackStart(const QString& itemId, qint64 positionTicks) {
+void JellyfinClient::reportPlaybackStart(const QString& itemId,
+                                          const JellyfinPlayback& info,
+                                          qint64 positionTicks) {
     QJsonObject body;
     body["ItemId"] = itemId;
     body["PositionTicks"] = (double) positionTicks;
-    body["PlayMethod"] = "DirectStream";
+    body["PlayMethod"] = playMethodString(info.method);
+    body["PlaySessionId"] = info.playSessionId;
+    body["MediaSourceId"] = info.mediaSourceId;
     body["CanSeek"] = true;
     QNetworkRequest req = makeRequest("/Sessions/Playing");
     QNetworkReply* reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
-void JellyfinClient::reportPlaybackProgress(const QString& itemId, qint64 positionTicks, bool paused) {
+void JellyfinClient::reportPlaybackProgress(const QString& itemId,
+                                             const JellyfinPlayback& info,
+                                             qint64 positionTicks, bool paused) {
     QJsonObject body;
     body["ItemId"] = itemId;
     body["PositionTicks"] = (double) positionTicks;
     body["IsPaused"] = paused;
-    body["PlayMethod"] = "DirectStream";
+    body["PlayMethod"] = playMethodString(info.method);
+    body["PlaySessionId"] = info.playSessionId;
+    body["MediaSourceId"] = info.mediaSourceId;
     body["EventName"] = "TimeUpdate";
     QNetworkRequest req = makeRequest("/Sessions/Playing/Progress");
     QNetworkReply* reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
-void JellyfinClient::reportPlaybackStopped(const QString& itemId, qint64 positionTicks) {
+void JellyfinClient::reportPlaybackStopped(const QString& itemId,
+                                            const JellyfinPlayback& info,
+                                            qint64 positionTicks) {
     QJsonObject body;
     body["ItemId"] = itemId;
     body["PositionTicks"] = (double) positionTicks;
+    body["PlayMethod"] = playMethodString(info.method);
+    body["PlaySessionId"] = info.playSessionId;
+    body["MediaSourceId"] = info.mediaSourceId;
     QNetworkRequest req = makeRequest("/Sessions/Playing/Stopped");
     QNetworkReply* reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);

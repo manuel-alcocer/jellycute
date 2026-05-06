@@ -38,6 +38,19 @@ struct JellyfinMediaSource {
     QList<JellyfinMediaStream> streams;
 };
 
+// Outcome of negotiating playback with the server: which URL to feed to mpv,
+// the play-mode the server agreed to, and the session identifier we have to
+// echo back on every subsequent /Sessions/Playing* report and on the
+// transcoding teardown.
+struct JellyfinPlayback {
+    QUrl url;
+    QString playSessionId;
+    QString mediaSourceId;
+    enum Method { DirectPlay, DirectStream, Transcode };
+    Method method = DirectPlay;
+    QString container;
+};
+
 struct JellyfinItem {
     QString id;
     QString name;
@@ -122,13 +135,32 @@ public:
                   const QString& type = QStringLiteral("Primary"),
                   int maxHeight = 360) const;
 
-    // Stream URL for libmpv (direct, server transcodes if needed)
+    // Direct-play URL. Used as a fallback when PlaybackInfo isn't reachable;
+    // production code should prefer resolvePlayback().
     QUrl streamUrl(const QString& itemId) const;
 
-    // Playback reporting
-    void reportPlaybackStart(const QString& itemId, qint64 positionTicks);
-    void reportPlaybackProgress(const QString& itemId, qint64 positionTicks, bool paused);
-    void reportPlaybackStopped(const QString& itemId, qint64 positionTicks);
+    // Negotiate playback with the server: posts a DeviceProfile to
+    // /Items/{id}/PlaybackInfo and asynchronously emits playbackResolved()
+    // (or playbackResolveFailed() on error) with the picked URL + session
+    // info. startTicks lets the server pre-position transcoding.
+    void resolvePlayback(const QString& itemId, qint64 startTicks = 0);
+
+    // Tears down a server-side transcoding session. Safe to call when the
+    // last play was a direct-play; the server just answers 204.
+    void stopActiveEncoding(const QString& playSessionId);
+
+    // Playback reporting. The play info from resolvePlayback() must be passed
+    // through so the server attributes watch time + transcoding to the right
+    // session.
+    void reportPlaybackStart(const QString& itemId,
+                             const JellyfinPlayback& info,
+                             qint64 positionTicks);
+    void reportPlaybackProgress(const QString& itemId,
+                                const JellyfinPlayback& info,
+                                qint64 positionTicks, bool paused);
+    void reportPlaybackStopped(const QString& itemId,
+                               const JellyfinPlayback& info,
+                               qint64 positionTicks);
 
 signals:
     void authenticated();
@@ -145,6 +177,8 @@ signals:
     void sagaSiblingsLoaded(const QString& itemId, const QList<JellyfinItem>& items);
     void genrePeersLoaded(const QString& itemId, const QList<JellyfinItem>& items);
     void similarLoaded(const QString& itemId, const QList<JellyfinItem>& items);
+    void playbackResolved(const QString& itemId, const JellyfinPlayback& info);
+    void playbackResolveFailed(const QString& itemId, const QString& message);
     void networkError(const QString& message);
 
 private:
@@ -153,6 +187,9 @@ private:
     QString authHeader(bool withToken) const;
     QList<JellyfinItem> parseItems(const QJsonArray& arr) const;
     void handleItemsReply(QNetworkReply* reply, const QString& parentId);
+    QUrl directPlayUrl(const QString& itemId, const QString& mediaSourceId,
+                       const QString& playSessionId) const;
+    QUrl absoluteFromRelative(const QString& s) const;
 
     QNetworkAccessManager m_nam;
     QUrl m_server;
