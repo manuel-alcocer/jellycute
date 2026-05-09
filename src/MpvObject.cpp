@@ -153,7 +153,10 @@ private:
 // -----------------------------------------------------------------------------
 
 MpvObject::MpvObject(QQuickItem* parent) : QQuickFramebufferObject(parent) {
-    setMirrorVertically(true);  // QQuickFBO renders bottom-up; flip for screen.
+    // mpv with flip_y=0 writes the frame top-down — the orientation
+    // QQuickFramebufferObject expects when mirrorVertically() is false (its
+    // default). Setting setMirrorVertically(true) here would flip a second
+    // time and render the video upside-down.
     setAcceptedMouseButtons(Qt::AllButtons);
     setAcceptHoverEvents(true);
     setActiveFocusOnTab(true);
@@ -312,6 +315,11 @@ void MpvObject::setSubtitleTrack(int id) {
 }
 
 QString MpvObject::detectedDefaultHwdec() const {
+    // Reported via the API for the QML hwdec menu to pre-select something
+    // sensible on first run. Not used for the actual mpv default — see
+    // resolveHwdec() below: nvdec on systems without CUDA aborts the
+    // process before mpv can fall back, so we hand mpv "auto-safe" instead
+    // and let it pick a working backend.
     const QString vendor = readPciVendorId();
     if (vendor == QStringLiteral("0x10de")) return QStringLiteral("nvdec");
     if (vendor == QStringLiteral("0x1002")) return QStringLiteral("vaapi");
@@ -320,7 +328,7 @@ QString MpvObject::detectedDefaultHwdec() const {
 }
 
 QString MpvObject::resolveHwdec(const QString& pref) const {
-    if (pref.isEmpty()) return detectedDefaultHwdec();
+    if (pref.isEmpty()) return QStringLiteral("auto-safe");
     return pref;
 }
 
