@@ -36,7 +36,7 @@ Kirigami.ApplicationWindow {
             Kirigami.Action {
                 text: qsTr("Configuración")
                 icon.name: "configure"
-                enabled: false   // Phase 4 ports the settings dialog.
+                onTriggered: root.pageStack.push(Qt.resolvedUrl("SettingsPage.qml"))
             }
         ]
 

@@ -172,6 +172,58 @@ QString AccountStore::findServerIdByUrl(const QUrl& url) const {
     return {};
 }
 
+QVariantList AccountStore::serverList() const {
+    QVariantList out;
+    for (const auto& s : m_servers) {
+        QVariantMap m;
+        m["id"]   = s.id;
+        m["name"] = s.name;
+        m["url"]  = s.url;
+        out.append(m);
+    }
+    return out;
+}
+
+QVariantList AccountStore::accountList() const {
+    QVariantList out;
+    for (const auto& a : m_accounts) {
+        QVariantMap m;
+        m["id"]       = a.id;
+        m["serverId"] = a.serverId;
+        m["username"] = a.username;
+        m["userId"]   = a.userId;
+        // token deliberately omitted — UI never needs to display it.
+        out.append(m);
+    }
+    return out;
+}
+
+QVariantMap AccountStore::serverAsMap(const QString& id) const {
+    for (const auto& s : m_servers) {
+        if (s.id != id) continue;
+        QVariantMap m;
+        m["id"]   = s.id;
+        m["name"] = s.name;
+        m["url"]  = s.url;
+        return m;
+    }
+    return {};
+}
+
+QVariantMap AccountStore::accountAsMap(const QString& id) const {
+    for (const auto& a : m_accounts) {
+        if (a.id != id) continue;
+        QVariantMap m;
+        m["id"]       = a.id;
+        m["serverId"] = a.serverId;
+        m["username"] = a.username;
+        m["userId"]   = a.userId;
+        m["token"]    = a.token;   // QML may need it to switch to this account.
+        return m;
+    }
+    return {};
+}
+
 void AccountStore::updateAccount(const AccountEntry& a) {
     for (auto& e : m_accounts) {
         if (e.id == a.id) {

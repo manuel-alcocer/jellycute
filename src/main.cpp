@@ -6,6 +6,7 @@
 #include "MainWindow.h"
 #include "MpvObject.h"
 #include "PlaybackSession.h"
+#include "Preferences.h"
 #include "Theme.h"
 
 #include <QApplication>
@@ -76,6 +77,7 @@ int main(int argc, char** argv) {
         BrowseModel resumeModel(&qmlClient);
         PlaybackSession playback;
         playback.setClient(&qmlClient);
+        Preferences preferences;
 
         qmlRegisterType<MpvObject>("Jellycute", 1, 0, "MpvObject");
         qmlRegisterType<BrowseModel>("Jellycute", 1, 0, "BrowseModel");
@@ -92,6 +94,10 @@ int main(int argc, char** argv) {
             "Jellycute", 1, 0, "AccountStore",
             QStringLiteral("Provided by the application as the 'accountStore' "
                            "context property"));
+        qmlRegisterUncreatableType<Preferences>(
+            "Jellycute", 1, 0, "Preferences",
+            QStringLiteral("Provided by the application as the 'preferences' "
+                           "context property"));
 
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("jellyfin", &qmlClient);
@@ -99,6 +105,7 @@ int main(int argc, char** argv) {
         engine.rootContext()->setContextProperty("resumeModel", &resumeModel);
         engine.rootContext()->setContextProperty("playback", &playback);
         engine.rootContext()->setContextProperty("accountStore", &store);
+        engine.rootContext()->setContextProperty("preferences", &preferences);
         engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
         if (engine.rootObjects().isEmpty()) return -1;
         return app.exec();

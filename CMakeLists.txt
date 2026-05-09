@@ -30,6 +30,7 @@ add_executable(jellycute
     src/ItemDetailModel.cpp
     src/PlaybackSession.cpp
     src/MpvObject.cpp
+    src/Preferences.cpp
     resources.qrc
 )
 

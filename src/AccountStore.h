@@ -4,6 +4,8 @@
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QVariantList>
+#include <QVariantMap>
 
 struct ServerEntry {
     QString id;
@@ -62,6 +64,14 @@ public:
     // Returns the empty string when no match exists. Used by LoginPage to
     // avoid registering the same server twice when the user re-logs in.
     Q_INVOKABLE QString findServerIdByUrl(const QUrl& url) const;
+
+    // QVariantMap views over the structs so QML can iterate them via
+    // Repeater / ListView without registering Q_GADGETs. Keys mirror the
+    // ServerEntry / AccountEntry field names.
+    Q_INVOKABLE QVariantList serverList() const;
+    Q_INVOKABLE QVariantList accountList() const;
+    Q_INVOKABLE QVariantMap serverAsMap(const QString& id) const;
+    Q_INVOKABLE QVariantMap accountAsMap(const QString& id) const;
 
     void migrateLegacy();
 
