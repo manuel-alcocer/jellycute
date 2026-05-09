@@ -6,12 +6,15 @@
 #include "PlaybackSession.h"
 #include "Preferences.h"
 
-#include <QGuiApplication>
+#include <QApplication>
 #include <QIcon>
+#include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
+#include <QStyleFactory>
 #include <QSurfaceFormat>
 #include <QUrl>
 #include <qqml.h>
@@ -31,22 +34,84 @@ int main(int argc, char** argv) {
 
     // Qt 6 defaults Qt Quick to RHI (Vulkan/Metal/D3D depending on platform).
     // MpvObject is a QQuickFramebufferObject which only works with the
-    // OpenGL backend — pin it explicitly. AA_ShareOpenGLContexts isn't
-    // strictly required without a Widgets GL context in the mix, but it's
-    // free insurance against future hybrid setups.
+    // OpenGL backend — pin it explicitly. AA_ShareOpenGLContexts is needed
+    // because we're back to a QApplication (Widgets) and the QStyle
+    // backend may create its own GL contexts for theme rendering paths.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
-    QGuiApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+    QApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
-    QGuiApplication app(argc, argv);
+    // Route the Qt Quick Controls 2 controls through qqc2-desktop-style
+    // so QStyle (Oxygen / Breeze / Fusion) draws them. Must happen before
+    // any QQmlApplicationEngine instantiation; setting it after is silently
+    // ignored. The application style itself is picked once QApplication
+    // is constructed below.
+    QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
 
-    // libmpv requires the C numeric locale. QGuiApplication's constructor
+    QApplication app(argc, argv);
+
+    // libmpv requires the C numeric locale. QApplication's constructor
     // resets it to the user's locale, so this must run *after* it.
     std::setlocale(LC_NUMERIC, "C");
 
     QCoreApplication::setOrganizationName("jellycute");
     QCoreApplication::setOrganizationDomain("jellycute.local");
     QCoreApplication::setApplicationName("jellycute");
-    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/icon.png")));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icon.png")));
+
+    // Pick Oxygen if available, falling back to Breeze and finally Fusion.
+    // Oxygen is the visual the user explicitly wants for buttons / sliders /
+    // combo boxes; on Plasma 6 it lives in the `oxygen` package via the
+    // oxygen6.so QStyle plugin.
+    {
+        const QStringList prefer{
+            QStringLiteral("Oxygen"),
+            QStringLiteral("Breeze"),
+            QStringLiteral("Fusion"),
+        };
+        const QStringList keys = QStyleFactory::keys();
+        for (const QString& s : prefer) {
+            if (keys.contains(s, Qt::CaseInsensitive)) {
+                if (auto* style = QStyleFactory::create(s)) {
+                    QApplication::setStyle(style);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Carbon dark palette so Oxygen's gradients render in dark greys. The
+    // hex values mirror the jelly tokens in qml/Main.qml — Kirigami.Theme
+    // overrides drive the QML side, this drives whatever QStyle paints.
+    {
+        const QColor base("#0a0d14");
+        const QColor altBase("#11151c");
+        const QColor elevated("#161a23");
+        const QColor text("#e6ecf3");
+        const QColor textDim("#8a98ad");
+        const QColor accent("#3daee9");
+        const QColor accentText("#0a0d14");
+
+        QPalette p;
+        p.setColor(QPalette::Window,           base);
+        p.setColor(QPalette::WindowText,       text);
+        p.setColor(QPalette::Base,             altBase);
+        p.setColor(QPalette::AlternateBase,    elevated);
+        p.setColor(QPalette::Text,             text);
+        p.setColor(QPalette::Button,           elevated);
+        p.setColor(QPalette::ButtonText,       text);
+        p.setColor(QPalette::BrightText,       QColor("#ffffff"));
+        p.setColor(QPalette::Highlight,        accent);
+        p.setColor(QPalette::HighlightedText,  accentText);
+        p.setColor(QPalette::Link,             accent);
+        p.setColor(QPalette::LinkVisited,      QColor("#7c5fde"));
+        p.setColor(QPalette::ToolTipBase,      altBase);
+        p.setColor(QPalette::ToolTipText,      text);
+        p.setColor(QPalette::PlaceholderText,  textDim);
+        p.setColor(QPalette::Disabled, QPalette::Text,       textDim);
+        p.setColor(QPalette::Disabled, QPalette::WindowText, textDim);
+        p.setColor(QPalette::Disabled, QPalette::ButtonText, textDim);
+        QApplication::setPalette(p);
+    }
 
     // Hydrate JellyfinClient from the persisted active account so the QML
     // shell can talk to the server immediately. If no account exists,
