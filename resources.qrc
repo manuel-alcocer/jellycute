@@ -3,5 +3,6 @@
   <qresource prefix="/">
     <file>icon.png</file>
     <file>artwork.png</file>
+    <file>qml/Main.qml</file>
   </qresource>
 </RCC>

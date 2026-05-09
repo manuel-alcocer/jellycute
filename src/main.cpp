@@ -6,6 +6,7 @@
 
 #include <QApplication>
 #include <QIcon>
+#include <QQmlApplicationEngine>
 #include <QStyleFactory>
 #include <QSurfaceFormat>
 #include <QUrl>
@@ -33,6 +34,16 @@ int main(int argc, char** argv) {
     QCoreApplication::setOrganizationDomain("jellycute.local");
     QCoreApplication::setApplicationName("jellycute");
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icon.png")));
+
+    // Phase 0 scaffolding: with JC_QML=1 boot the Kirigami shell instead of
+    // the Widgets MainWindow. The two paths are mutually exclusive while the
+    // QML port is in progress.
+    if (qEnvironmentVariableIsSet("JC_QML")) {
+        QQmlApplicationEngine engine;
+        engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+        if (engine.rootObjects().isEmpty()) return -1;
+        return app.exec();
+    }
 
     // Pin a Qt style with Breeze/Fusion as fallbacks; the Theme module then
     // applies the active theme's stylesheet + palette on top.

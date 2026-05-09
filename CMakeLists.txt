@@ -7,7 +7,8 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Network OpenGLWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Network OpenGLWidgets Qml Quick QuickControls2)
+find_package(KF6Kirigami REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
 
@@ -32,5 +33,9 @@ target_link_libraries(jellycute PRIVATE
     Qt6::Widgets
     Qt6::Network
     Qt6::OpenGLWidgets
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::QuickControls2
+    KF6::Kirigami
     PkgConfig::MPV
 )
