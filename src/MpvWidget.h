@@ -37,6 +37,9 @@ public:
 
     int volume() const { return m_volume; }
     void setVolume(int v);
+    bool isMuted() const { return m_muted; }
+    void setMuted(bool on);
+    void toggleMute();
     void setVideoAspect(const QString& spec);   // "-1" = auto, e.g. "16/9"
 
     // Hardware-decode controls.
@@ -53,6 +56,7 @@ signals:
     void pausedChanged(bool paused);
     void tracksChanged();
     void volumeChanged(int volume);
+    void mutedChanged(bool muted);
     void idleChanged(bool idle);
     void endReached();
     void fullscreenToggleRequested();
@@ -89,6 +93,7 @@ private:
     qint64 m_positionSeconds = 0;
     qint64 m_durationSeconds = 0;
     int m_volume = 100;
+    bool m_muted = false;
     bool m_paused = false;
     bool m_idle = true;
     QString m_hwdecSetting;        // "" = auto

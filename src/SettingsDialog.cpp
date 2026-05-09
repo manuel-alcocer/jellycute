@@ -266,6 +266,7 @@ SettingsDialog::SettingsDialog(BrowserWidget* browser, MpvWidget* player,
     new QListWidgetItem(tr("Bibliotecas"),  m_categories);
     new QListWidgetItem(tr("Reproducción"), m_categories);
     new QListWidgetItem(tr("Apariencia"),   m_categories);
+    new QListWidgetItem(tr("Acerca de"),    m_categories);
     m_categories->setCurrentRow(0);
     split->addWidget(m_categories);
 
@@ -274,6 +275,7 @@ SettingsDialog::SettingsDialog(BrowserWidget* browser, MpvWidget* player,
     m_pages->addWidget(buildLibrariesPage());
     m_pages->addWidget(buildPlaybackPage());
     m_pages->addWidget(buildAppearancePage());
+    m_pages->addWidget(buildAboutPage());
     split->addWidget(m_pages, 1);
 
     connect(m_probe, &ServerProbe::finished, this,
@@ -678,6 +680,39 @@ QWidget* SettingsDialog::buildAppearancePage() {
 
     const QString currentKey = Theme::currentKey();
     (currentKey == "carbon" ? carbonBtn : lightBtn)->setChecked(true);
+
+    layout->addStretch();
+    return page;
+}
+
+QWidget* SettingsDialog::buildAboutPage() {
+    auto* page = new QWidget(this);
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+    layout->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+
+    auto* art = new QLabel(page);
+    art->setAlignment(Qt::AlignCenter);
+    QPixmap pm(QStringLiteral(":/artwork.png"));
+    if (!pm.isNull()) {
+        art->setPixmap(pm.scaled(360, 360, Qt::KeepAspectRatio,
+                                 Qt::SmoothTransformation));
+    }
+    layout->addWidget(art);
+
+    auto* desc = new QLabel(
+        tr("<p><b>jellycute</b> es un cliente de escritorio para servidores "
+           "Jellyfin construido con Qt6 y reproducción nativa vía libmpv.</p>"
+           "<p>Soporta múltiples cuentas y servidores, tema claro y oscuro, "
+           "selección de pistas de audio y subtítulos, y aceleración por "
+           "hardware.</p>"),
+        page);
+    desc->setWordWrap(true);
+    desc->setTextFormat(Qt::RichText);
+    desc->setAlignment(Qt::AlignCenter);
+    desc->setMaximumWidth(440);
+    layout->addWidget(desc, 0, Qt::AlignHCenter);
 
     layout->addStretch();
     return page;

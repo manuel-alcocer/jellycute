@@ -94,6 +94,7 @@ MpvWidget::MpvWidget(QWidget* parent) : QOpenGLWidget(parent) {
     mpv_observe_property(m_mpv, 3, "idle-active", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 4, "duration", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 5, "volume", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 6, "mute",   MPV_FORMAT_FLAG);
 
     mpv_set_wakeup_callback(m_mpv, &MpvWidget::onMpvWakeup, this);
 }
@@ -251,6 +252,15 @@ void MpvWidget::setVolume(int v) {
     mpv_set_property_string(m_mpv, "volume", s.constData());
 }
 
+void MpvWidget::setMuted(bool on) {
+    if (!m_mpv) return;
+    mpv_set_property_string(m_mpv, "mute", on ? "yes" : "no");
+}
+
+void MpvWidget::toggleMute() {
+    setMuted(!m_muted);
+}
+
 void MpvWidget::setVideoAspect(const QString& spec) {
     if (!m_mpv) return;
     if (spec == QStringLiteral("auto")) {
@@ -315,6 +325,12 @@ void MpvWidget::handleMpvEvent(mpv_event* ev) {
             if (v != m_volume) {
                 m_volume = v;
                 emit volumeChanged(v);
+            }
+        } else if (name == "mute" && prop->format == MPV_FORMAT_FLAG) {
+            bool m = *(int*) prop->data != 0;
+            if (m != m_muted) {
+                m_muted = m;
+                emit mutedChanged(m);
             }
         }
         break;

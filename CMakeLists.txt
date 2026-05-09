@@ -24,6 +24,7 @@ add_executable(jellycute
     src/Theme.cpp
     src/AccountStore.cpp
     src/ServerProbe.cpp
+    resources.qrc
 )
 
 target_include_directories(jellycute PRIVATE src)

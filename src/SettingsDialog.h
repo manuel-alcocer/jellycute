@@ -26,6 +26,7 @@ private:
     QWidget* buildPlaybackPage();
     QWidget* buildAppearancePage();
     QWidget* buildConnectionsPage();
+    QWidget* buildAboutPage();
 
     void refreshServers();
     void refreshAccounts();

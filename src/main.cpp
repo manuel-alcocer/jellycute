@@ -5,6 +5,7 @@
 #include "Theme.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QStyleFactory>
 #include <QSurfaceFormat>
 #include <QUrl>
@@ -31,6 +32,7 @@ int main(int argc, char** argv) {
     QCoreApplication::setOrganizationName("jellycute");
     QCoreApplication::setOrganizationDomain("jellycute.local");
     QCoreApplication::setApplicationName("jellycute");
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icon.png")));
 
     // Pin a Qt style with Breeze/Fusion as fallbacks; the Theme module then
     // applies the active theme's stylesheet + palette on top.

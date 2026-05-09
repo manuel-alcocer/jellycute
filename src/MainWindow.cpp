@@ -33,7 +33,10 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QToolTip>
 #include <QVBoxLayout>
+#include <cmath>
+#include <functional>
 
 namespace {
 constexpr qint64 TICKS_PER_SECOND = 10'000'000LL;
@@ -192,6 +195,21 @@ QIcon iconVolume() {
         p.drawPath(w);
     });
 }
+QIcon iconVolumeMuted() {
+    // Speaker silhouette + diagonal slash to communicate the muted state.
+    return makeIcon(24, [](QPainter& p) {
+        QPainterPath s;
+        s.moveTo(3, 9); s.lineTo(7, 9); s.lineTo(11, 5);
+        s.lineTo(11, 19); s.lineTo(7, 15); s.lineTo(3, 15);
+        s.closeSubpath();
+        p.drawPath(s);
+        QPen pen = p.pen();
+        pen.setWidthF(2.0);
+        p.setPen(pen);
+        p.drawLine(QPointF(14, 8), QPointF(21, 16));
+        p.drawLine(QPointF(21, 8), QPointF(14, 16));
+    });
+}
 QIcon iconAutoHide() {
     // A pushpin: filled head + needle below. The button's :checked styling
     // (sunken/blue) communicates that the auto-hide mode is active.
@@ -257,6 +275,73 @@ QIcon iconExit() {
 }
 }
 
+/* QSlider variant that jumps to the clicked position on press (instead of
+   stepping by pageStep) and shows a tooltip describing the value under the
+   cursor while hovering. The tooltip text is produced by an injected
+   formatter so the same widget renders both the position-time string and
+   the volume-percent string. */
+class ClickableSlider : public QSlider {
+public:
+    using TooltipFormatter = std::function<QString(int)>;
+    explicit ClickableSlider(Qt::Orientation o, QWidget* parent = nullptr)
+        : QSlider(o, parent) {
+        setMouseTracking(true);
+    }
+    void setTooltipFormatter(TooltipFormatter f) { m_fmt = std::move(f); }
+
+protected:
+    void mousePressEvent(QMouseEvent* e) override {
+        if (e->button() == Qt::LeftButton) {
+            const int v = valueFromPos(e->pos());
+            setSliderDown(true);
+            emit sliderPressed();
+            setValue(v);
+            emit sliderMoved(v);
+            e->accept();
+            return;
+        }
+        QSlider::mousePressEvent(e);
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if (isSliderDown()) {
+            const int v = valueFromPos(e->pos());
+            setValue(v);
+            emit sliderMoved(v);
+        }
+        if (m_fmt)
+            QToolTip::showText(e->globalPosition().toPoint(),
+                               m_fmt(valueFromPos(e->pos())), this);
+        QSlider::mouseMoveEvent(e);
+    }
+    void mouseReleaseEvent(QMouseEvent* e) override {
+        if (e->button() == Qt::LeftButton && isSliderDown()) {
+            setSliderDown(false);
+            emit sliderReleased();
+            e->accept();
+            return;
+        }
+        QSlider::mouseReleaseEvent(e);
+    }
+
+private:
+    int valueFromPos(QPoint p) const {
+        int x, span;
+        if (orientation() == Qt::Horizontal) {
+            x = p.x();
+            span = width();
+        } else {
+            x = height() - p.y();
+            span = height();
+        }
+        if (span <= 0) return minimum();
+        const double t = double(qBound(0, x, span)) / double(span);
+        return minimum() +
+               int(std::round(t * double(maximum() - minimum())));
+    }
+
+    TooltipFormatter m_fmt;
+};
+
 /* Custom widget that owns its paintEvent fully: each setText() schedules a
    single repaint, the entire bounding rect is filled with the parent palette
    colour, and the new glyphs are drawn in one drawText() call. No partial
@@ -304,18 +389,7 @@ MainWindow::MainWindow(JellyfinClient* client, QWidget* parent)
     playerLayout->setContentsMargins(0, 0, 0, 0);
     playerLayout->setSpacing(0);
 
-    m_playerBar = new QWidget(m_playerPage);
-    auto* barLayout = new QHBoxLayout(m_playerBar);
-    barLayout->setContentsMargins(6, 4, 6, 4);
-    barLayout->setSpacing(6);
-    auto* fsBtn = new QToolButton(m_playerBar);
-    fsBtn->setText(tr("⛶ Pantalla completa"));
-    fsBtn->setToolTip(tr("Alternar pantalla completa (F)"));
-    barLayout->addStretch();
-    barLayout->addWidget(fsBtn);
-
     m_player = new MpvWidget(m_playerPage);
-    playerLayout->addWidget(m_playerBar);
     playerLayout->addWidget(m_player, 1);
 
     buildPlayerControlBar();
@@ -328,8 +402,6 @@ MainWindow::MainWindow(JellyfinClient* client, QWidget* parent)
     m_stack->addWidget(m_browser);
     m_stack->addWidget(m_playerPage);
     setCentralWidget(m_stack);
-
-    connect(fsBtn, &QToolButton::clicked, this, &MainWindow::toggleFullscreen);
 
     m_progressTimer = new QTimer(this);
     m_progressTimer->setInterval(5000);
@@ -365,6 +437,12 @@ MainWindow::MainWindow(JellyfinClient* client, QWidget* parent)
             QSignalBlocker b(m_volumeSlider);
             m_volumeSlider->setValue(v);
         }
+    });
+    connect(m_player, &MpvWidget::mutedChanged, this, [this](bool muted) {
+        if (m_volumeIconBtn)
+            m_volumeIconBtn->setToolTip(muted ? tr("Activar sonido")
+                                              : tr("Silenciar"));
+        applyControlBarIcons();
     });
     connect(m_player, &MpvWidget::fullscreenToggleRequested,
             this, &MainWindow::toggleFullscreen);
@@ -455,7 +533,6 @@ void MainWindow::buildToolBar() {
     connect(m_fullscreenAct, &QAction::toggled, this, [this](bool on) {
         if (on == isFullScreen()) return;
         statusBar()->setVisible(!on);
-        if (m_playerBar) m_playerBar->setVisible(!on);
         if (m_toolBar) m_toolBar->setVisible(!on);
         if (on) showFullScreen(); else showNormal();
         if (on) m_player->setFocus();
@@ -525,10 +602,13 @@ void MainWindow::buildPlayerControlBar() {
     m_seekFwdBtn->setToolTip(tr("Adelantar 10s"));
     m_seekFwdBtn->setAutoRaise(true);
 
-    m_positionSlider = new QSlider(Qt::Horizontal, m_controlBar);
-    m_positionSlider->setRange(0, 0);
-    m_positionSlider->setSingleStep(5);
-    m_positionSlider->setPageStep(60);
+    auto* posSlider = new ClickableSlider(Qt::Horizontal, m_controlBar);
+    posSlider->setRange(0, 0);
+    posSlider->setSingleStep(5);
+    posSlider->setPageStep(60);
+    posSlider->setTooltipFormatter(
+        [](int v) { return MainWindow::hms(qint64(v)); });
+    m_positionSlider = posSlider;
 
     // Use the inherited (regular) font — same as menus/labels. Widths come
     // from the worst-case "88:88:88" so digits with different metrics don't
@@ -572,13 +652,17 @@ void MainWindow::buildPlayerControlBar() {
     m_volumeIconBtn = new QToolButton(m_controlBar);
     m_volumeIconBtn->setIcon(iconVolume());
     m_volumeIconBtn->setAutoRaise(true);
-    m_volumeIconBtn->setEnabled(false);   // pure indicator, no click action.
+    m_volumeIconBtn->setToolTip(tr("Silenciar"));
+    connect(m_volumeIconBtn, &QToolButton::clicked, this,
+            [this]() { m_player->toggleMute(); });
 
-    m_volumeSlider = new QSlider(Qt::Horizontal, m_controlBar);
-    m_volumeSlider->setRange(0, 100);
-    m_volumeSlider->setValue(100);
-    m_volumeSlider->setFixedWidth(90);
-    m_volumeSlider->setToolTip(tr("Volumen"));
+    auto* volSlider = new ClickableSlider(Qt::Horizontal, m_controlBar);
+    volSlider->setRange(0, 100);
+    volSlider->setValue(100);
+    volSlider->setFixedWidth(90);
+    volSlider->setTooltipFormatter(
+        [](int v) { return QStringLiteral("%1%").arg(v); });
+    m_volumeSlider = volSlider;
     connect(m_volumeSlider, &QSlider::valueChanged, this,
             [this](int v) { m_player->setVolume(v); });
 
@@ -589,6 +673,13 @@ void MainWindow::buildPlayerControlBar() {
     m_autoHideBtn->setToolTip(tr("Auto-ocultar controles"));
     connect(m_autoHideBtn, &QToolButton::toggled, this,
             [this](bool on) { setAutoHideEnabled(on); });
+
+    m_fullscreenBtn = new QToolButton(m_controlBar);
+    m_fullscreenBtn->setIcon(iconFullscreen());
+    m_fullscreenBtn->setAutoRaise(true);
+    m_fullscreenBtn->setToolTip(tr("Alternar pantalla completa (F11)"));
+    connect(m_fullscreenBtn, &QToolButton::clicked, this,
+            &MainWindow::toggleFullscreen);
 
     m_aspectBtn = new QToolButton(m_controlBar);
     m_aspectBtn->setIcon(iconAspect());
@@ -625,6 +716,7 @@ void MainWindow::buildPlayerControlBar() {
     cb->addWidget(m_subBtn);
     cb->addWidget(m_aspectBtn);
     cb->addWidget(m_autoHideBtn);
+    cb->addWidget(m_fullscreenBtn);
     cb->addWidget(m_posLabel);
     cb->addWidget(sep);
     cb->addWidget(m_durLabel);
@@ -909,11 +1001,16 @@ void MainWindow::applyControlBarIcons() {
     };
     if (m_seekBackBtn) m_seekBackBtn->setIcon(themed(iconSeekBack()));
     if (m_seekFwdBtn)  m_seekFwdBtn->setIcon(themed(iconSeekFwd()));
-    if (m_volumeIconBtn) m_volumeIconBtn->setIcon(themed(iconVolume()));
+    if (m_volumeIconBtn) {
+        const bool muted = m_player && m_player->isMuted();
+        m_volumeIconBtn->setIcon(themed(muted ? iconVolumeMuted()
+                                              : iconVolume()));
+    }
     if (m_audioBtn)    m_audioBtn->setIcon(themed(iconAudio()));
     if (m_subBtn)      m_subBtn->setIcon(themed(iconSubs()));
     if (m_aspectBtn)   m_aspectBtn->setIcon(themed(iconAspect()));
     if (m_autoHideBtn) m_autoHideBtn->setIcon(themed(iconAutoHide()));
+    if (m_fullscreenBtn) m_fullscreenBtn->setIcon(themed(iconFullscreen()));
     if (m_playPauseBtn && m_player)
         m_playPauseBtn->setIcon(themed(m_player->isPaused() ? iconPlay()
                                                             : iconPause()));

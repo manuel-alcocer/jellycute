@@ -70,7 +70,6 @@ private:
     BrowserWidget* m_browser;
     MpvWidget* m_player;
     QWidget* m_playerPage = nullptr;
-    QWidget* m_playerBar = nullptr;
     QWidget* m_controlBar = nullptr;
     QToolButton* m_playPauseBtn = nullptr;
     QSlider* m_positionSlider = nullptr;
@@ -80,6 +79,7 @@ private:
     QToolButton* m_subBtn = nullptr;
     QToolButton* m_aspectBtn = nullptr;
     QToolButton* m_autoHideBtn = nullptr;
+    QToolButton* m_fullscreenBtn = nullptr;
     QToolButton* m_seekBackBtn = nullptr;
     QToolButton* m_seekFwdBtn = nullptr;
     QToolButton* m_volumeIconBtn = nullptr;
