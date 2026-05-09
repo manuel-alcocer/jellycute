@@ -11,13 +11,32 @@ import Jellycute 1.0
 Kirigami.Page {
     id: page
 
-    // Kirigami.Page defaults to colorSet=View internally, which Kirigami
-    // resolves through KColorScheme (the system Plasma theme — usually
-    // light). Force Window so the carbon overrides we set on the
-    // ApplicationWindow root take effect on the page's background and
-    // text.
+    // Pin the Kirigami palette to the carbon tokens regardless of the
+    // system KColorScheme. Setting colorSet alone isn't enough because
+    // Kirigami.Page hard-codes colorSet=View internally and Kirigami
+    // re-resolves colours from KColorScheme on every colorSet change;
+    // inherit:false plus explicit overrides short-circuits that path.
+    Kirigami.Theme.inherit: false
     Kirigami.Theme.colorSet: Kirigami.Theme.Window
-    Kirigami.Theme.inherit: true
+    Kirigami.Theme.backgroundColor:           applicationWindow().jelly.carbonBase
+    Kirigami.Theme.textColor:                 applicationWindow().jelly.textPrimary
+    Kirigami.Theme.alternateBackgroundColor:  applicationWindow().jelly.carbonElevated
+    Kirigami.Theme.disabledTextColor:         applicationWindow().jelly.textDim
+    Kirigami.Theme.highlightColor:            applicationWindow().jelly.accent
+    Kirigami.Theme.highlightedTextColor:      "#0a0d14"
+    Kirigami.Theme.focusColor:                applicationWindow().jelly.accent
+    Kirigami.Theme.hoverColor:                applicationWindow().jelly.accentHot
+    Kirigami.Theme.linkColor:                 applicationWindow().jelly.accent
+    Kirigami.Theme.negativeTextColor:         "#f78787"
+    Kirigami.Theme.positiveTextColor:         "#7ce0a6"
+    Kirigami.Theme.neutralTextColor:          "#f7c987"
+
+    // Belt-and-braces: paint the page background directly so it can't fall
+    // back to the QStyle's window colour if anything goes wrong with the
+    // theme override above.
+    background: Rectangle {
+        color: applicationWindow().jelly.carbonBase
+    }
 
     title: qsTr("Inicio")
     padding: 0

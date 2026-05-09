@@ -14,10 +14,26 @@ import Jellycute 1.0
 Kirigami.Page {
     id: page
 
-    // Force Window colorSet so the carbon overrides on the root take
-    // effect; Kirigami.Page defaults to View.
+    // Pin the Kirigami palette to the carbon tokens regardless of the
+    // system KColorScheme — see HomePage.qml for the rationale.
+    Kirigami.Theme.inherit: false
     Kirigami.Theme.colorSet: Kirigami.Theme.Window
-    Kirigami.Theme.inherit: true
+    Kirigami.Theme.backgroundColor:           applicationWindow().jelly.carbonBase
+    Kirigami.Theme.textColor:                 applicationWindow().jelly.textPrimary
+    Kirigami.Theme.alternateBackgroundColor:  applicationWindow().jelly.carbonElevated
+    Kirigami.Theme.disabledTextColor:         applicationWindow().jelly.textDim
+    Kirigami.Theme.highlightColor:            applicationWindow().jelly.accent
+    Kirigami.Theme.highlightedTextColor:      "#0a0d14"
+    Kirigami.Theme.focusColor:                applicationWindow().jelly.accent
+    Kirigami.Theme.hoverColor:                applicationWindow().jelly.accentHot
+    Kirigami.Theme.linkColor:                 applicationWindow().jelly.accent
+    Kirigami.Theme.negativeTextColor:         "#f78787"
+    Kirigami.Theme.positiveTextColor:         "#7ce0a6"
+    Kirigami.Theme.neutralTextColor:          "#f7c987"
+
+    background: Rectangle {
+        color: applicationWindow().jelly.carbonBase
+    }
 
     title: qsTr("Reproductor")
     padding: 0
