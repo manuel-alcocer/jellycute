@@ -123,38 +123,82 @@ Kirigami.ApplicationWindow {
             border.width: 1
         }
 
-        actions: [
-            Kirigami.Action {
-                text: qsTr("Inicio")
-                icon.name: "go-home"
-                onTriggered: {
-                    while (root.pageStack.depth > 1) root.pageStack.pop();
-                }
-            },
-            Kirigami.Action { separator: true },
-            Kirigami.Action {
-                text: qsTr("Reproductor de prueba")
-                icon.name: "media-playback-start"
-                onTriggered: root.pageStack.push(Qt.resolvedUrl("PlayerPage.qml"))
-            },
-            Kirigami.Action {
-                text: qsTr("Configuración")
-                icon.name: "configure"
-                onTriggered: root.pageStack.push(Qt.resolvedUrl("SettingsPage.qml"))
-            }
-        ]
-
-        // Library entries below the static actions. GlobalDrawer accepts
-        // arbitrary content; we render libraries as ItemDelegates so they
-        // pick up the Kirigami theme automatically.
+        // We don't use the actions: [...] list because Kirigami.Global-
+        // Drawer renders Kirigami.Action items through an internal delegate
+        // whose Kirigami.Theme bypasses the carbon overrides we set on the
+        // drawer itself, which leaves the action labels in the system text
+        // colour. Building the entries by hand from ItemDelegate gives us
+        // direct control over the contentItem's Label colour.
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 0
 
+            // Static entries (Home / Player / Settings).
+            Repeater {
+                model: [
+                    {label: qsTr("Inicio"),                 icon: "go-home",
+                     act: "home"},
+                    {label: qsTr("Reproductor de prueba"),  icon: "media-playback-start",
+                     act: "player"},
+                    {label: qsTr("Configuración"),          icon: "configure",
+                     act: "settings"},
+                ]
+                delegate: ItemDelegate {
+                    Layout.fillWidth: true
+                    hoverEnabled: true
+
+                    background: Rectangle {
+                        color: hovered ? root.jelly.carbonHover : "transparent"
+                    }
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.largeSpacing
+                        Kirigami.Icon {
+                            Layout.leftMargin: Kirigami.Units.largeSpacing
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                            source: modelData.icon
+                            color: root.jelly.textPrimary
+                            isMask: true
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: modelData.label
+                            color: root.jelly.textPrimary
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    onClicked: {
+                        switch (modelData.act) {
+                        case "home":
+                            while (root.pageStack.depth > 1) root.pageStack.pop();
+                            break;
+                        case "player":
+                            root.pageStack.push(Qt.resolvedUrl("PlayerPage.qml"));
+                            break;
+                        case "settings":
+                            root.pageStack.push(Qt.resolvedUrl("SettingsPage.qml"));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Subtle horizontal separator before the libraries section.
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                Layout.bottomMargin: Kirigami.Units.smallSpacing
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.rightMargin: Kirigami.Units.largeSpacing
+                height: 1
+                color: root.jelly.borderSubtle
+            }
+
             Kirigami.Heading {
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
-                Layout.topMargin: Kirigami.Units.largeSpacing
+                Layout.topMargin: Kirigami.Units.smallSpacing
                 Layout.bottomMargin: Kirigami.Units.smallSpacing
                 text: qsTr("Bibliotecas")
                 level: 4
@@ -163,17 +207,41 @@ Kirigami.ApplicationWindow {
                 opacity: 0.85
             }
 
+            // Library entries — same recipe as the static entries above.
             Repeater {
                 model: viewsModel
 
                 delegate: ItemDelegate {
                     Layout.fillWidth: true
-                    text: model.name
-                    icon.name: model.collectionType === "tvshows"
-                        ? "video-television"
-                        : model.collectionType === "movies"
-                            ? "applications-multimedia"
-                            : "folder"
+                    hoverEnabled: true
+
+                    readonly property string libIcon:
+                        model.collectionType === "tvshows"
+                            ? "video-television"
+                            : model.collectionType === "movies"
+                                ? "applications-multimedia"
+                                : "folder"
+
+                    background: Rectangle {
+                        color: hovered ? root.jelly.carbonHover : "transparent"
+                    }
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.largeSpacing
+                        Kirigami.Icon {
+                            Layout.leftMargin: Kirigami.Units.largeSpacing
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                            source: libIcon
+                            color: root.jelly.textPrimary
+                            isMask: true
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: model.name
+                            color: root.jelly.textPrimary
+                            elide: Text.ElideRight
+                        }
+                    }
 
                     onClicked: {
                         root.pageStack.push(Qt.resolvedUrl("GridPage.qml"), {
