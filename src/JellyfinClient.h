@@ -102,38 +102,39 @@ public:
     QString clientVersion() const { return m_clientVersion; }
 
     // Auth
-    void authenticate(const QString& username, const QString& password);
+    Q_INVOKABLE void authenticate(const QString& username, const QString& password);
 
     // Browsing
-    void fetchUserViews();
-    void fetchItems(const QString& parentId,
-                    const QString& includeItemTypes = QString(),
-                    bool recursive = false,
-                    const QString& sortBy = QStringLiteral("SortName"),
-                    const QString& nameStartsWith = QString(),
-                    int startIndex = 0,
-                    int limit = 0);
-    void fetchResume();
-    void fetchEpisodes(const QString& seriesId);
-    void fetchLatest(const QString& parentId, const QString& includeItemTypes = QString(),
-                     int limit = 16);
-    void fetchItemDetails(const QString& itemId);
+    Q_INVOKABLE void fetchUserViews();
+    Q_INVOKABLE void fetchItems(const QString& parentId,
+                                const QString& includeItemTypes = QString(),
+                                bool recursive = false,
+                                const QString& sortBy = QStringLiteral("SortName"),
+                                const QString& nameStartsWith = QString(),
+                                int startIndex = 0,
+                                int limit = 0);
+    Q_INVOKABLE void fetchResume();
+    Q_INVOKABLE void fetchEpisodes(const QString& seriesId);
+    Q_INVOKABLE void fetchLatest(const QString& parentId,
+                                 const QString& includeItemTypes = QString(),
+                                 int limit = 16);
+    Q_INVOKABLE void fetchItemDetails(const QString& itemId);
 
     // Related-content lookups for the detail page.
-    void fetchSagaSiblings(const QString& itemId);
-    void fetchGenrePeers(const QString& itemId,
-                         const QStringList& genres,
-                         int limit = 10);
-    void fetchSimilar(const QString& itemId, int limit = 10);
+    Q_INVOKABLE void fetchSagaSiblings(const QString& itemId);
+    Q_INVOKABLE void fetchGenrePeers(const QString& itemId,
+                                     const QStringList& genres,
+                                     int limit = 10);
+    Q_INVOKABLE void fetchSimilar(const QString& itemId, int limit = 10);
 
     // User-data mutations.
-    void setFavorite(const QString& itemId, bool favorite);
-    void setPlayed(const QString& itemId, bool played);
+    Q_INVOKABLE void setFavorite(const QString& itemId, bool favorite);
+    Q_INVOKABLE void setPlayed(const QString& itemId, bool played);
 
     // Image URL helper
-    QUrl imageUrl(const QString& itemId, const QString& tag,
-                  const QString& type = QStringLiteral("Primary"),
-                  int maxHeight = 360) const;
+    Q_INVOKABLE QUrl imageUrl(const QString& itemId, const QString& tag,
+                              const QString& type = QStringLiteral("Primary"),
+                              int maxHeight = 360) const;
 
     // Direct-play URL. Used as a fallback when PlaybackInfo isn't reachable;
     // production code should prefer resolvePlayback().

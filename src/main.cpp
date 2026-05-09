@@ -1,4 +1,5 @@
 #include "AccountStore.h"
+#include "BrowseModel.h"
 #include "JellyfinClient.h"
 #include "LoginDialog.h"
 #include "MainWindow.h"
@@ -7,6 +8,7 @@
 #include <QApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QStyleFactory>
 #include <QSurfaceFormat>
 #include <QUrl>
@@ -35,11 +37,32 @@ int main(int argc, char** argv) {
     QCoreApplication::setApplicationName("jellycute");
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icon.png")));
 
-    // Phase 0 scaffolding: with JC_QML=1 boot the Kirigami shell instead of
-    // the Widgets MainWindow. The two paths are mutually exclusive while the
-    // QML port is in progress.
+    // Phase 0/1 scaffolding: with JC_QML=1 boot the Kirigami shell instead
+    // of the Widgets MainWindow. The two paths are mutually exclusive while
+    // the QML port is in progress; the QML side reuses the same JellyfinClient
+    // bootstrap (active account from AccountStore -> setServer/setCredentials)
+    // so models in QML can talk to the server immediately.
     if (qEnvironmentVariableIsSet("JC_QML")) {
+        JellyfinClient qmlClient;
+        auto& store = AccountStore::instance();
+        AccountEntry current = store.currentAccount();
+        if (current.id.isEmpty() && !store.accounts().isEmpty()) {
+            current = store.accounts().first();
+            store.setCurrentAccountId(current.id);
+        }
+        if (!current.id.isEmpty()) {
+            const ServerEntry srv = store.server(current.serverId);
+            qmlClient.setServer(srv.url);
+            qmlClient.setCredentials(current.userId, current.token);
+        }
+        // Phase 4 will add the QML login flow; for now an unauthenticated
+        // start is allowed so the shell still opens.
+
+        BrowseModel viewsModel(&qmlClient);
+
         QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("client", &qmlClient);
+        engine.rootContext()->setContextProperty("viewsModel", &viewsModel);
         engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
         if (engine.rootObjects().isEmpty()) return -1;
         return app.exec();
