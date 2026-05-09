@@ -1,5 +1,11 @@
 # History
 
+## 2026-05-09
+
+- **feat(theme):** carbon dark visual with rounded corners and Oxygen QStyle
+- **feat(ui):** Kirigami/QML rewrite with client-side carbon decoration
+- **feat:** drop Widgets UI for a Kirigami shell with carbon-fibre theme
+
 ## 2026-05-06
 
 - **feat:** multi-server accounts, dark theme, and server-side streaming
