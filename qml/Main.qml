@@ -20,6 +20,11 @@ Kirigami.ApplicationWindow {
                 text: qsTr("Cargar")
                 icon.name: "view-refresh"
                 onTriggered: viewsModel.loadUserViews()
+            },
+            Kirigami.Action {
+                text: qsTr("Reproductor")
+                icon.name: "media-playback-start"
+                onTriggered: root.pageStack.push(Qt.resolvedUrl("PlayerPage.qml"))
             }
         ]
 

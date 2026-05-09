@@ -27,6 +27,7 @@ add_executable(jellycute
     src/ServerProbe.cpp
     src/ItemListModel.cpp
     src/BrowseModel.cpp
+    src/MpvObject.cpp
     resources.qrc
 )
 

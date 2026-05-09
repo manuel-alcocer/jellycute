@@ -503,8 +503,10 @@ void applyCarbonPalette() {
 }  // anonymous
 
 Name current() {
+    // Dark ("carbon") is the default for new installs; existing users keep
+    // whatever their QSettings already holds.
     return fromKey(QSettings()
-                       .value(QStringLiteral("theme"), QStringLiteral("light"))
+                       .value(QStringLiteral("theme"), QStringLiteral("carbon"))
                        .toString());
 }
 

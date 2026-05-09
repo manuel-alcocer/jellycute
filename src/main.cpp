@@ -3,15 +3,19 @@
 #include "JellyfinClient.h"
 #include "LoginDialog.h"
 #include "MainWindow.h"
+#include "MpvObject.h"
 #include "Theme.h"
 
 #include <QApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QStyleFactory>
 #include <QSurfaceFormat>
 #include <QUrl>
+#include <qqml.h>
 #include <locale>
 
 int main(int argc, char** argv) {
@@ -25,6 +29,14 @@ int main(int argc, char** argv) {
         fmt.setRenderableType(QSurfaceFormat::OpenGL);
         QSurfaceFormat::setDefaultFormat(fmt);
     }
+
+    // Qt 6 defaults Qt Quick to RHI (Vulkan/Metal/D3D depending on platform).
+    // MpvObject is a QQuickFramebufferObject which only works with the
+    // OpenGL backend — pin it explicitly. AA_ShareOpenGLContexts keeps the
+    // SG render-thread context interoperable with widget GL contexts when
+    // both subsystems coexist.
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    QApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
     QApplication app(argc, argv);
 
@@ -59,6 +71,8 @@ int main(int argc, char** argv) {
         // start is allowed so the shell still opens.
 
         BrowseModel viewsModel(&qmlClient);
+
+        qmlRegisterType<MpvObject>("Jellycute", 1, 0, "MpvObject");
 
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("client", &qmlClient);

@@ -4,5 +4,6 @@
     <file>icon.png</file>
     <file>artwork.png</file>
     <file>qml/Main.qml</file>
+    <file>qml/PlayerPage.qml</file>
   </qresource>
 </RCC>
