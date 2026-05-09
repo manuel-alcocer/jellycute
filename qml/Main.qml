@@ -12,6 +12,7 @@ Kirigami.ApplicationWindow {
     visible: true
 
     globalDrawer: Kirigami.GlobalDrawer {
+        id: drawer
         title: qsTr("jellycute")
         titleIcon: "applications-multimedia"
         modal: false
@@ -38,6 +39,47 @@ Kirigami.ApplicationWindow {
                 enabled: false   // Phase 4 ports the settings dialog.
             }
         ]
+
+        // Library entries below the static actions. GlobalDrawer accepts
+        // arbitrary content; we render libraries as ItemDelegates so they
+        // pick up the Kirigami theme automatically.
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 0
+
+            Kirigami.Heading {
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.largeSpacing
+                Layout.topMargin: Kirigami.Units.largeSpacing
+                Layout.bottomMargin: Kirigami.Units.smallSpacing
+                text: qsTr("Bibliotecas")
+                level: 4
+                visible: viewsModel.count > 0
+                opacity: 0.7
+            }
+
+            Repeater {
+                model: viewsModel
+
+                delegate: ItemDelegate {
+                    Layout.fillWidth: true
+                    text: model.name
+                    icon.name: model.collectionType === "tvshows"
+                        ? "video-television"
+                        : model.collectionType === "movies"
+                            ? "applications-multimedia"
+                            : "folder"
+
+                    onClicked: {
+                        root.pageStack.push(Qt.resolvedUrl("GridPage.qml"), {
+                            parentId: model.id,
+                            parentName: model.name,
+                            collectionType: model.collectionType
+                        });
+                    }
+                }
+            }
+        }
     }
 
     pageStack.initialPage: Qt.resolvedUrl("HomePage.qml")

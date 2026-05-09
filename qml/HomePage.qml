@@ -38,9 +38,8 @@ Kirigami.Page {
                 useBackdropPosters: true
                 visible: resumeModel.count > 0
 
-                onItemClicked: function(itemId, itemType) {
-                    // Phase 3c will resolve playback and push PlayerPage.
-                    console.log("Resume click:", itemId, itemType);
+                onItemClicked: function(idx) {
+                    page.handleClick(resumeModel, idx)
                 }
             }
 
@@ -71,10 +70,8 @@ Kirigami.Page {
                         useBackdropPosters: libDelegate.libCollection === "tvshows"
                         visible: latestModel.count > 0
 
-                        onItemClicked: function(itemId, itemType) {
-                            // Phase 3c hooks this up to DetailPage / playback.
-                            console.log("Latest click:", itemId, itemType,
-                                        "in", libDelegate.libId);
+                        onItemClicked: function(idx) {
+                            page.handleClick(latestModel, idx)
                         }
                     }
                 }
@@ -96,5 +93,23 @@ Kirigami.Page {
         // and for the future sidebar; resumeModel populates the first row.
         if (viewsModel.count === 0) viewsModel.loadUserViews();
         if (resumeModel.count === 0) resumeModel.loadResume();
+    }
+
+    function handleClick(model, idx) {
+        var item = model.get(idx);
+        if (!item) return;
+        var folderTypes = ["Series", "Season", "BoxSet", "Folder",
+                           "CollectionFolder", "MusicAlbum", "MusicArtist"];
+        var isFolder = item.isFolder || folderTypes.indexOf(item.type) >= 0;
+        if (isFolder) {
+            applicationWindow().pageStack.push(Qt.resolvedUrl("GridPage.qml"), {
+                parentId: item.id,
+                parentName: item.name,
+                collectionType: item.collectionType || ""
+            });
+        } else {
+            // Phase 3c will push DetailPage with this item.
+            console.log("DetailPage TBD:", item.id, item.type, item.name);
+        }
     }
 }

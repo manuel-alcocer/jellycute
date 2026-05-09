@@ -18,7 +18,11 @@ ColumnLayout {
     property bool useBackdropPosters: false   // false = vertical 2:3, true = backdrop 16:9
     property real posterUnits: useBackdropPosters ? 16 : 8
 
-    signal itemClicked(string itemId, string itemType)
+    // Emit the row index so consumers can fetch the full item via
+    // mediaModel.get(index) — passing single fields here would silently
+    // truncate state needed for navigation (collectionType, isFolder,
+    // seriesId, etc.).
+    signal itemClicked(int index)
 
     spacing: Kirigami.Units.smallSpacing
 
@@ -61,7 +65,7 @@ ColumnLayout {
                 radius: Kirigami.Units.smallSpacing
             }
 
-            onClicked: root.itemClicked(model.id, model.type)
+            onClicked: root.itemClicked(index)
 
             contentItem: ColumnLayout {
                 spacing: Kirigami.Units.smallSpacing

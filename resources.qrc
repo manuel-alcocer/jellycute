@@ -5,6 +5,7 @@
     <file>artwork.png</file>
     <file>qml/Main.qml</file>
     <file>qml/HomePage.qml</file>
+    <file>qml/GridPage.qml</file>
     <file>qml/MediaRow.qml</file>
     <file>qml/PlayerPage.qml</file>
   </qresource>
