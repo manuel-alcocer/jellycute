@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QLoggingCategory>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QOpenGLContext>
@@ -20,6 +21,10 @@
 #include <QSettings>
 #include <QVarLengthArray>
 #include <QWheelEvent>
+
+namespace {
+Q_LOGGING_CATEGORY(lcMpv, "jellycute.mpv")
+}
 
 namespace {
 
@@ -76,35 +81,38 @@ public:
     explicit MpvRenderer(MpvObject* item)
         : m_item(item) {}
 
-    ~MpvRenderer() override {
-        if (m_renderCtx) {
-            mpv_render_context_free(m_renderCtx);
-            m_renderCtx = nullptr;
-        }
-    }
+    // The render context is owned by the item (so its destructor can free
+    // it before mpv_terminate_destroy runs); we just create it lazily on
+    // the SG thread when the GL context is current.
 
     QOpenGLFramebufferObject* createFramebufferObject(const QSize& size) override {
-        if (!m_renderCtx) {
+        if (!m_item->renderCtx()) {
             mpv_opengl_init_params glInit{
                 /*get_proc_address=*/&getProcAddress,
                 /*get_proc_address_ctx=*/nullptr,
             };
-            int advancedControl = 1;
+            // MPV_RENDER_PARAM_ADVANCED_CONTROL is intentionally omitted:
+            // it lets mpv assume a stricter render-driver contract (timing,
+            // DR buffer allocation, hwdec interop) that QQuickFramebuffer-
+            // Object's split GUI/SG thread model can't satisfy. Without it
+            // mpv stays on the basic VO contract that the modern qt_opengl
+            // example uses.
             mpv_render_param params[] = {
                 {MPV_RENDER_PARAM_API_TYPE, const_cast<char*>(MPV_RENDER_API_TYPE_OPENGL)},
                 {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &glInit},
-                {MPV_RENDER_PARAM_ADVANCED_CONTROL, &advancedControl},
                 {MPV_RENDER_PARAM_INVALID, nullptr},
             };
-            if (mpv_render_context_create(&m_renderCtx, m_item->handle(), params) < 0)
+            mpv_render_context* ctx = nullptr;
+            if (mpv_render_context_create(&ctx, m_item->handle(), params) < 0)
                 qFatal("mpv_render_context_create failed (Qt Quick path)");
+            m_item->setRenderCtx(ctx);
 
             // Bridge mpv's "I have a new frame" signal back to QQuickItem's
             // update() so the scene-graph schedules another render() pass.
             mpv_render_context_set_update_callback(
-                m_renderCtx,
-                [](void* ctx) {
-                    auto* obj = static_cast<MpvObject*>(ctx);
+                ctx,
+                [](void* obj_ctx) {
+                    auto* obj = static_cast<MpvObject*>(obj_ctx);
                     QMetaObject::invokeMethod(obj, &MpvObject::update,
                                               Qt::QueuedConnection);
                 },
@@ -116,7 +124,8 @@ public:
     }
 
     void render() override {
-        if (!m_renderCtx) return;
+        mpv_render_context* ctx = m_item->renderCtx();
+        if (!ctx) return;
 
         // Tell Qt Quick we're about to issue raw GL state changes so it
         // doesn't assume its own state survives across the render pass.
@@ -136,14 +145,13 @@ public:
             {MPV_RENDER_PARAM_FLIP_Y, &flipY},
             {MPV_RENDER_PARAM_INVALID, nullptr},
         };
-        mpv_render_context_render(m_renderCtx, params);
+        mpv_render_context_render(ctx, params);
 
         if (auto* w = m_item->window()) w->endExternalCommands();
     }
 
 private:
     MpvObject* m_item;
-    mpv_render_context* m_renderCtx = nullptr;
 };
 
 }  // anonymous
@@ -162,6 +170,7 @@ MpvObject::MpvObject(QQuickItem* parent) : QQuickFramebufferObject(parent) {
     setActiveFocusOnTab(true);
     setFlag(ItemHasContents, true);
 
+    qCDebug(lcMpv) << "ctor: mpv_create";
     m_mpv = mpv_create();
     if (!m_mpv) qFatal("mpv_create failed (Qt Quick path)");
 
@@ -177,6 +186,26 @@ MpvObject::MpvObject(QQuickItem* parent) : QQuickFramebufferObject(parent) {
     mpvSetOption(m_mpv, "idle", "yes");
     mpvSetOption(m_mpv, "ytdl", "no");
     mpvSetOption(m_mpv, "audio-display", "no");
+    // If the audio output fails or a decoder errors out mid-seek, switch
+    // to a null AO instead of aborting playback. We've seen mp3float
+    // crash the process after a resume seek lands mid-frame; keeping the
+    // video alive is preferable to dropping back to the browser.
+    mpvSetOption(m_mpv, "audio-fallback-to-null", "yes");
+    // mpv default is 0.2s; the larger buffer mostly helped software-only
+    // decoding on slow CPUs but made resume seeks bumpy on VBR streams.
+    mpvSetOption(m_mpv, "audio-buffer", "0.2");
+    // Reinforce hwdec=no: even when the top-level setting is "no", mpv's
+    // hwdec-codecs default still asks libavcodec to probe hwaccel for the
+    // listed codecs, which dlopens libcuda on systems where the NVIDIA shim
+    // is installed but libcuda.so.1 is missing. An empty list short-circuits
+    // that probe.
+    mpvSetOption(m_mpv, "hwdec-codecs", "");
+    mpvSetOption(m_mpv, "vd-lavc-software-fallback", "yes");
+    // Disable any GL-side hwdec interop. With vo=libmpv the OpenGL backend
+    // sometimes tries to set up CUDA/Vulkan interop even when hwdec=no,
+    // which abuses libnvcuvid on Arch's ffmpeg build and crashes when
+    // libcuda.so.1 isn't installed.
+    mpvSetOption(m_mpv, "gpu-hwdec-interop", "no");
 
     if (const char* envHwdec = std::getenv("JELLYCUTE_MPV_HWDEC")) {
         m_hwdecSetting = QString::fromUtf8(envHwdec);
@@ -188,8 +217,11 @@ MpvObject::MpvObject(QQuickItem* parent) : QQuickFramebufferObject(parent) {
 
     mpvSetOption(m_mpv, "audio-buffer", "1.0");
     mpvSetOption(m_mpv, "terminal", "yes");
+    // libmpv_render=fatal silences libmpv_render's noisy gl_check_error
+    // entries that fire after probe/init even when nothing is wrong.
     mpvSetOption(m_mpv, "msg-level", "all=warn,libmpv_render=fatal");
 
+    qCDebug(lcMpv) << "ctor: hwdec=" << m_resolvedHwdec << "— mpv_initialize";
     if (mpv_initialize(m_mpv) < 0) qFatal("mpv_initialize failed (Qt Quick path)");
 
     mpvCommand(m_mpv, {"keybind", "q", "stop"});
@@ -206,9 +238,17 @@ MpvObject::MpvObject(QQuickItem* parent) : QQuickFramebufferObject(parent) {
 }
 
 MpvObject::~MpvObject() {
+    // libmpv requires that mpv_render_context_free() be called before the
+    // libmpv core is terminated. Qt's scene graph tears down our Renderer
+    // asynchronously, which can race with mpv_terminate_destroy() and trip
+    // mpv's "Broken API use" abort. Owning the render context on the item
+    // and freeing it here in the dtor (before mpv_terminate_destroy) is the
+    // canonical pattern from mpv-examples/qt_opengl.
+    if (m_renderCtx) {
+        mpv_render_context_free(m_renderCtx);
+        m_renderCtx = nullptr;
+    }
     if (m_mpv) {
-        // Renderer (and its mpv_render_context) is destroyed by Qt Quick
-        // when the scene graph tears down; the libmpv core is freed last.
         mpv_terminate_destroy(m_mpv);
         m_mpv = nullptr;
     }
@@ -221,6 +261,7 @@ QQuickFramebufferObject::Renderer* MpvObject::createRenderer() const {
 // ---- High-level commands ---------------------------------------------------
 
 void MpvObject::play(const QString& url, qint64 startSeconds) {
+    qCDebug(lcMpv) << "play startSeconds=" << startSeconds << "url=" << url;
     if (!m_mpv) return;
     QByteArray u = url.toUtf8();
     if (startSeconds > 0) {
@@ -328,7 +369,14 @@ QString MpvObject::detectedDefaultHwdec() const {
 }
 
 QString MpvObject::resolveHwdec(const QString& pref) const {
-    if (pref.isEmpty()) return QStringLiteral("auto-safe");
+    if (pref.isEmpty()) {
+        // auto-safe still probes nvdec-copy (which dlopens libcuda.so.1).
+        // On systems without CUDA the probe leaves enough state that an
+        // unrelated decoder error later aborts the process. Default to
+        // "no" until the QML settings menu lets the user pick a backend
+        // explicitly; the JELLYCUTE_MPV_HWDEC env var still overrides.
+        return QStringLiteral("no");
+    }
     return pref;
 }
 

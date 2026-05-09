@@ -1,7 +1,10 @@
 #include "PlaybackSession.h"
 
+#include <QLoggingCategory>
+
 namespace {
 constexpr qint64 TICKS_PER_SECOND = 10'000'000LL;
+Q_LOGGING_CATEGORY(lcPlay, "jellycute.playback")
 }
 
 PlaybackSession::PlaybackSession(QObject* parent) : QObject(parent) {}
@@ -18,6 +21,7 @@ void PlaybackSession::setClient(JellyfinClient* c) {
 }
 
 void PlaybackSession::start(const QString& itemId, qint64 startSeconds) {
+    qCDebug(lcPlay) << "start" << itemId << "startSeconds=" << startSeconds;
     if (!m_client || itemId.isEmpty()) return;
     m_itemId = itemId;
     m_startSeconds = startSeconds;
@@ -74,6 +78,7 @@ void PlaybackSession::cancel() {
 
 void PlaybackSession::onResolved(const QString& itemId,
                                  const JellyfinPlayback& info) {
+    qCDebug(lcPlay) << "onResolved" << itemId << "method=" << int(info.method);
     if (itemId != m_itemId) return;
     m_info = info;
     emit streamUrlChanged();
@@ -82,6 +87,7 @@ void PlaybackSession::onResolved(const QString& itemId,
 
 void PlaybackSession::onResolveFailed(const QString& itemId,
                                       const QString& message) {
+    qCWarning(lcPlay) << "onResolveFailed" << itemId << message;
     if (itemId != m_itemId) return;
     setState(QStringLiteral("error"), message);
 }

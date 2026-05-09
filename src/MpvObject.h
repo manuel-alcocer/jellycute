@@ -33,8 +33,14 @@ public:
 
     Renderer* createRenderer() const override;
 
-    // Borrow access for the renderer (which lives on a different thread).
+    // Borrowed by MpvRenderer (which runs on the SG render thread). The
+    // render context is created lazily in the renderer but stored here on
+    // the item so the item's destructor can free it before the libmpv core
+    // is terminated — mpv aborts with "Broken API use:
+    // mpv_render_context_free() not called" otherwise.
     mpv_handle* handle() const { return m_mpv; }
+    mpv_render_context* renderCtx() const { return m_renderCtx; }
+    void setRenderCtx(mpv_render_context* ctx) { m_renderCtx = ctx; }
 
     Q_INVOKABLE void play(const QString& url, qint64 startSeconds = 0);
     Q_INVOKABLE void stop();
@@ -97,6 +103,7 @@ private:
     QString resolveHwdec(const QString& pref) const;
 
     mpv_handle* m_mpv = nullptr;
+    mpv_render_context* m_renderCtx = nullptr;
     qint64 m_positionSeconds = 0;
     qint64 m_durationSeconds = 0;
     int m_volume = 100;
