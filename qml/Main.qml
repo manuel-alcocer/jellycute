@@ -95,6 +95,25 @@ Kirigami.ApplicationWindow {
         collapsible: true
         showHeaderWhenCollapsed: true
 
+        // Same KColorScheme-bypass treatment we apply to pages: kill
+        // inheritance and override every colour role explicitly so the
+        // drawer entries (Kirigami.Action / ItemDelegate) render in the
+        // carbon palette regardless of the user's Plasma theme.
+        Kirigami.Theme.inherit: false
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.backgroundColor:           root.jelly.carbonAlt
+        Kirigami.Theme.textColor:                 root.jelly.textPrimary
+        Kirigami.Theme.alternateBackgroundColor:  root.jelly.carbonElevated
+        Kirigami.Theme.disabledTextColor:         root.jelly.textDim
+        Kirigami.Theme.highlightColor:            root.jelly.accent
+        Kirigami.Theme.highlightedTextColor:      "#0a0d14"
+        Kirigami.Theme.focusColor:                root.jelly.accent
+        Kirigami.Theme.hoverColor:                root.jelly.accentHot
+        Kirigami.Theme.linkColor:                 root.jelly.accent
+        Kirigami.Theme.negativeTextColor:         "#f78787"
+        Kirigami.Theme.positiveTextColor:         "#7ce0a6"
+        Kirigami.Theme.neutralTextColor:          "#f7c987"
+
         // Carbon backdrop with a faint dark hairline so the drawer reads as
         // a separate panel without competing with the main panel's blue
         // border.
@@ -169,8 +188,22 @@ Kirigami.ApplicationWindow {
     }
 
     header: CarbonTitleBar {
-        title: root.title
+        // Compose "jellycute — <current page title>" so we still surface
+        // the active page name now that the global toolbar is gone.
+        title: {
+            var pageTitle = root.pageStack.currentItem
+                            ? root.pageStack.currentItem.title : "";
+            return pageTitle && pageTitle !== root.title
+                ? root.title + " — " + pageTitle
+                : root.title;
+        }
     }
+
+    // No global toolbar above the page content: it lived in its own
+    // Kirigami.Theme.Header colorSet that's awkward to override on top of
+    // our Window overrides, so it kept landing as a light grey strip. Our
+    // CarbonTitleBar already shows the page title alongside the app name.
+    pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
 
     pageStack.initialPage: Qt.resolvedUrl("HomePage.qml")
 
