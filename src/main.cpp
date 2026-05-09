@@ -1,9 +1,11 @@
 #include "AccountStore.h"
 #include "BrowseModel.h"
+#include "ItemDetailModel.h"
 #include "JellyfinClient.h"
 #include "LoginDialog.h"
 #include "MainWindow.h"
 #include "MpvObject.h"
+#include "PlaybackSession.h"
 #include "Theme.h"
 
 #include <QApplication>
@@ -72,18 +74,26 @@ int main(int argc, char** argv) {
 
         BrowseModel viewsModel(&qmlClient);
         BrowseModel resumeModel(&qmlClient);
+        PlaybackSession playback;
+        playback.setClient(&qmlClient);
 
         qmlRegisterType<MpvObject>("Jellycute", 1, 0, "MpvObject");
         qmlRegisterType<BrowseModel>("Jellycute", 1, 0, "BrowseModel");
+        qmlRegisterType<ItemDetailModel>("Jellycute", 1, 0, "ItemDetailModel");
         qmlRegisterUncreatableType<JellyfinClient>(
             "Jellycute", 1, 0, "JellyfinClient",
             QStringLiteral("Provided by the application as the 'jellyfin' "
+                           "context property"));
+        qmlRegisterUncreatableType<PlaybackSession>(
+            "Jellycute", 1, 0, "PlaybackSession",
+            QStringLiteral("Provided by the application as the 'playback' "
                            "context property"));
 
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("jellyfin", &qmlClient);
         engine.rootContext()->setContextProperty("viewsModel", &viewsModel);
         engine.rootContext()->setContextProperty("resumeModel", &resumeModel);
+        engine.rootContext()->setContextProperty("playback", &playback);
         engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
         if (engine.rootObjects().isEmpty()) return -1;
         return app.exec();

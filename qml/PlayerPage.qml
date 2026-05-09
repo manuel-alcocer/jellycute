@@ -4,11 +4,21 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import Jellycute 1.0
 
+// Two operating modes share this page:
+//   - Session mode: pushed after playback.start() resolves a stream URL on
+//     the server. Auto-plays, reports start/progress/stop back through the
+//     PlaybackSession, and pops on end-of-file.
+//   - Test mode: opened from the sidebar when playback is idle. Shows a URL
+//     field + Play button so a raw stream can be tried without going through
+//     a server resolution.
 Kirigami.Page {
     id: page
 
-    title: qsTr("Reproductor de prueba")
+    title: qsTr("Reproductor")
     padding: 0
+
+    readonly property bool sessionMode: playback.state !== "idle"
+    property bool _autoStarted: false
 
     function fmt(secs) {
         if (secs <= 0) return "00:00";
@@ -17,6 +27,59 @@ Kirigami.Page {
         var s = Math.floor(secs % 60);
         var two = function(n) { return n < 10 ? "0" + n : "" + n; };
         return h > 0 ? h + ":" + two(m) + ":" + two(s) : two(m) + ":" + two(s);
+    }
+
+    function maybeAutoPlay() {
+        if (page._autoStarted) return;
+        if (!page.sessionMode) return;
+        if (playback.state !== "ready") return;
+        page._autoStarted = true;
+        mpv.play(playback.streamUrl, playback.startSeconds);
+    }
+
+    Component.onCompleted: {
+        mpv.forceActiveFocus();
+        maybeAutoPlay();
+    }
+
+    // Session-mode lifecycle: tell the server when playback actually starts
+    // (mpv has the file loaded), every 10s while it's running, and on EOF.
+    Connections {
+        target: mpv
+        function onPlaybackStarted() {
+            if (page.sessionMode) playback.reportStarted(mpv.position);
+        }
+        function onEndReached() {
+            if (page.sessionMode && playback.state === "playing")
+                playback.reportStopped(mpv.position);
+            applicationWindow().pageStack.pop();
+        }
+    }
+
+    // If the page lands while playback is still resolving, kick off as soon
+    // as the stream URL becomes ready.
+    Connections {
+        target: playback
+        function onStateChanged() { page.maybeAutoPlay(); }
+    }
+
+    Timer {
+        id: progressTimer
+        interval: 10000
+        repeat: true
+        running: page.sessionMode && playback.state === "playing"
+                 && mpv.duration > 0
+        onTriggered: playback.reportProgress(mpv.position, mpv.paused)
+    }
+
+    // User pops back without reaching EOF — report a stop so the server
+    // doesn't think we're still watching, and tear down any transcode.
+    Component.onDestruction: {
+        if (!page.sessionMode) return;
+        if (playback.state === "playing")
+            playback.reportStopped(mpv.position);
+        else if (playback.state !== "ended")
+            playback.cancel();
     }
 
     ColumnLayout {
@@ -28,19 +91,10 @@ Kirigami.Page {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            Component.onCompleted: forceActiveFocus()
-
-            // Black backdrop so the FBO area never shows the page background
-            // when no frame has been rendered yet.
             Rectangle {
                 anchors.fill: parent
                 color: "black"
                 z: -1
-            }
-
-            onEndReached: {
-                // Phase 3 will route this back to the previous page; for now
-                // we just stay on the player and reset position display.
             }
         }
 
@@ -53,16 +107,17 @@ Kirigami.Page {
                 anchors.fill: parent
                 spacing: Kirigami.Units.smallSpacing
 
+                // Test-mode URL bar. Hidden once a session is active to keep
+                // the player chrome clean.
                 RowLayout {
                     Layout.fillWidth: true
+                    visible: !page.sessionMode
                     spacing: Kirigami.Units.smallSpacing
 
                     TextField {
                         id: urlField
                         Layout.fillWidth: true
                         placeholderText: qsTr("URL del vídeo (file://, http://, https://)")
-                        text: Qt.application.arguments.length > 1
-                              ? Qt.application.arguments[1] : ""
                     }
                     Button {
                         text: qsTr("Reproducir")
@@ -83,7 +138,11 @@ Kirigami.Page {
                     }
                     ToolButton {
                         icon.name: "media-playback-stop"
-                        onClicked: mpv.stop()
+                        onClicked: {
+                            mpv.stop();
+                            if (page.sessionMode)
+                                applicationWindow().pageStack.pop();
+                        }
                     }
                     ToolButton {
                         icon.name: "media-skip-backward"
@@ -124,5 +183,11 @@ Kirigami.Page {
                 }
             }
         }
+    }
+
+    BusyIndicator {
+        anchors.centerIn: parent
+        running: page.sessionMode && playback.state === "resolving"
+        z: 100
     }
 }

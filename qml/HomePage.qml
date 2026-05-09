@@ -108,8 +108,10 @@ Kirigami.Page {
                 collectionType: item.collectionType || ""
             });
         } else {
-            // Phase 3c will push DetailPage with this item.
-            console.log("DetailPage TBD:", item.id, item.type, item.name);
+            applicationWindow().pageStack.push(Qt.resolvedUrl("DetailPage.qml"), {
+                itemId: item.id,
+                initialItem: item
+            });
         }
     }
 }

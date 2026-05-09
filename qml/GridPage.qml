@@ -51,8 +51,10 @@ Kirigami.Page {
                 collectionType: item.collectionType || page.collectionType
             });
         } else {
-            // Phase 3c routes playable items to DetailPage; for now, just log.
-            console.log("DetailPage TBD:", item.id, item.type, item.name);
+            applicationWindow().pageStack.push(Qt.resolvedUrl("DetailPage.qml"), {
+                itemId: item.id,
+                initialItem: item
+            });
         }
     }
 
