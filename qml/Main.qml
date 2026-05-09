@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import org.kde.kirigami as Kirigami
 
 Kirigami.ApplicationWindow {
@@ -10,6 +11,14 @@ Kirigami.ApplicationWindow {
     width: 1280
     height: 800
     visible: true
+
+    // Strip the system / compositor decoration so the entire frame ―
+    // titlebar + edges ― is ours to paint in carbon. The custom CarbonTitle-
+    // Bar in `header` provides the move/min/max/close controls; resize
+    // handles on the edges below delegate to startSystemResize() which the
+    // compositor honours via xdg-shell on Wayland and _NET_WM_MOVERESIZE
+    // on X11.
+    flags: Qt.Window | Qt.FramelessWindowHint
 
     // ---- Design tokens (carbon fibre + blue glass) -----------------------
     // Reachable from anywhere as applicationWindow().jelly. Used by pages
@@ -160,7 +169,88 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    header: CarbonTitleBar {
+        title: root.title
+    }
+
     pageStack.initialPage: Qt.resolvedUrl("HomePage.qml")
+
+    // Saturated blue hairline on the four window edges, drawn on top of
+    // everything so the carbon frame reads as a single unit.
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+        border.width: 1
+        border.color: root.jelly.glassBorder
+        z: 998
+    }
+
+    // Resize handles on the four edges + four corners. Each is a thin
+    // MouseArea anchored to a single side of the window; on press it
+    // hands the resize loop to the compositor via startSystemResize().
+    // Corners overlap the edges and have higher z so the diagonal cursor
+    // takes priority near the corner.
+    Item {
+        anchors.fill: parent
+        z: 999
+
+        readonly property int edge: 4
+        readonly property int corner: 10
+
+        MouseArea {                              // left
+            x: 0; y: parent.corner
+            width: parent.edge
+            height: parent.height - 2 * parent.corner
+            cursorShape: Qt.SizeHorCursor
+            onPressed: root.startSystemResize(Qt.LeftEdge)
+        }
+        MouseArea {                              // right
+            x: parent.width - parent.edge; y: parent.corner
+            width: parent.edge
+            height: parent.height - 2 * parent.corner
+            cursorShape: Qt.SizeHorCursor
+            onPressed: root.startSystemResize(Qt.RightEdge)
+        }
+        MouseArea {                              // top
+            x: parent.corner; y: 0
+            width: parent.width - 2 * parent.corner
+            height: parent.edge
+            cursorShape: Qt.SizeVerCursor
+            onPressed: root.startSystemResize(Qt.TopEdge)
+        }
+        MouseArea {                              // bottom
+            x: parent.corner; y: parent.height - parent.edge
+            width: parent.width - 2 * parent.corner
+            height: parent.edge
+            cursorShape: Qt.SizeVerCursor
+            onPressed: root.startSystemResize(Qt.BottomEdge)
+        }
+
+        MouseArea {                              // top-left
+            x: 0; y: 0
+            width: parent.corner; height: parent.corner
+            cursorShape: Qt.SizeFDiagCursor
+            onPressed: root.startSystemResize(Qt.TopEdge | Qt.LeftEdge)
+        }
+        MouseArea {                              // top-right
+            x: parent.width - parent.corner; y: 0
+            width: parent.corner; height: parent.corner
+            cursorShape: Qt.SizeBDiagCursor
+            onPressed: root.startSystemResize(Qt.TopEdge | Qt.RightEdge)
+        }
+        MouseArea {                              // bottom-left
+            x: 0; y: parent.height - parent.corner
+            width: parent.corner; height: parent.corner
+            cursorShape: Qt.SizeBDiagCursor
+            onPressed: root.startSystemResize(Qt.BottomEdge | Qt.LeftEdge)
+        }
+        MouseArea {                              // bottom-right
+            x: parent.width - parent.corner; y: parent.height - parent.corner
+            width: parent.corner; height: parent.corner
+            cursorShape: Qt.SizeFDiagCursor
+            onPressed: root.startSystemResize(Qt.BottomEdge | Qt.RightEdge)
+        }
+    }
 
     Component.onCompleted: {
         // No active account on startup → push the login form on top of the

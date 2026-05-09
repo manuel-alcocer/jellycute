@@ -8,6 +8,7 @@
     <file>qml/GridPage.qml</file>
     <file>qml/DetailPage.qml</file>
     <file>qml/LoginPage.qml</file>
+    <file>qml/CarbonTitleBar.qml</file>
     <file>qml/MediaRow.qml</file>
     <file>qml/PlayerPage.qml</file>
     <file>qml/SettingsPage.qml</file>
