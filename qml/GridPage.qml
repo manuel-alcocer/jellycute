@@ -11,6 +11,12 @@ import Jellycute 1.0
 Kirigami.Page {
     id: page
 
+    // Force Window colorSet so the carbon overrides on the root take
+    // effect; Kirigami.Page defaults to View which would pull a light
+    // Plasma colour scheme from KColorScheme.
+    Kirigami.Theme.colorSet: Kirigami.Theme.Window
+    Kirigami.Theme.inherit: true
+
     property string parentId: ""
     property string parentName: ""
     property string collectionType: ""        // "movies"/"tvshows"/...

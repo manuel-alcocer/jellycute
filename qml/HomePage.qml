@@ -11,6 +11,14 @@ import Jellycute 1.0
 Kirigami.Page {
     id: page
 
+    // Kirigami.Page defaults to colorSet=View internally, which Kirigami
+    // resolves through KColorScheme (the system Plasma theme — usually
+    // light). Force Window so the carbon overrides we set on the
+    // ApplicationWindow root take effect on the page's background and
+    // text.
+    Kirigami.Theme.colorSet: Kirigami.Theme.Window
+    Kirigami.Theme.inherit: true
+
     title: qsTr("Inicio")
     padding: 0
 
