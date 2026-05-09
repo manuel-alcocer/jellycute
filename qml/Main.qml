@@ -20,31 +20,28 @@ Kirigami.ApplicationWindow {
     // on X11.
     flags: Qt.Window | Qt.FramelessWindowHint
 
-    // ---- Design tokens (carbon fibre + blue glass) -----------------------
-    // Reachable from anywhere as applicationWindow().jelly. Used by pages
-    // that need a richer surface than what Kirigami.Theme exposes (custom
-    // borders, glass tint, hover glow).
+    // ---- Design tokens (carbon-only, blue strictly as accent) ------------
+    // Reachable from anywhere as applicationWindow().jelly. Surfaces are
+    // pure dark greys; the only blue in the visual language is the
+    // fluorescent accent — used on the main panel border, on card hover,
+    // and on focus highlights.
     readonly property QtObject jelly: QtObject {
-        readonly property color carbonBase:    "#0a0d14"
-        readonly property color carbonAlt:     "#11151c"
-        readonly property color carbonWeave:   "#161a23"
-        readonly property color glassSurface:  "#152035"
-        readonly property color glassSurfaceAlt:"#1d2c47"
-        readonly property color glassHover:    "#243a5e"
-        readonly property color glassBorder:   "#2c5a8a"
-        readonly property color glassBorderHot:"#3daee9"
-        readonly property color accent:        "#3daee9"
-        readonly property color accentDim:     "#1e6e9e"
-        readonly property color accentHot:     "#5fb8ff"
-        readonly property color textPrimary:   "#e6ecf3"
-        readonly property color textDim:       "#8a98ad"
+        readonly property color carbonBase:     "#0a0d14"   // window background
+        readonly property color carbonAlt:      "#11151c"   // titlebar, drawer, panes
+        readonly property color carbonElevated: "#161a23"   // cards / raised surfaces
+        readonly property color carbonHover:    "#1d2230"   // card hover background
+        readonly property color borderSubtle:   "#222a36"   // faint card / pane outline
+        readonly property color accent:         "#3daee9"   // fluorescent blue
+        readonly property color accentHot:      "#5fb8ff"   // brighter accent for focus
+        readonly property color textPrimary:    "#e6ecf3"
+        readonly property color textDim:        "#8a98ad"
     }
 
     // ---- Kirigami palette override ---------------------------------------
     Kirigami.Theme.inherit: false
     Kirigami.Theme.colorSet: Kirigami.Theme.Window
     Kirigami.Theme.backgroundColor:           jelly.carbonBase
-    Kirigami.Theme.alternateBackgroundColor:  jelly.glassSurface
+    Kirigami.Theme.alternateBackgroundColor:  jelly.carbonElevated
     Kirigami.Theme.textColor:                 jelly.textPrimary
     Kirigami.Theme.disabledTextColor:         jelly.textDim
     Kirigami.Theme.highlightColor:            jelly.accent
@@ -98,10 +95,12 @@ Kirigami.ApplicationWindow {
         collapsible: true
         showHeaderWhenCollapsed: true
 
-        // Glass-ish background for the drawer.
+        // Carbon backdrop with a faint dark hairline so the drawer reads as
+        // a separate panel without competing with the main panel's blue
+        // border.
         background: Rectangle {
             color: root.jelly.carbonAlt
-            border.color: root.jelly.glassBorder
+            border.color: root.jelly.borderSubtle
             border.width: 1
         }
 
@@ -175,21 +174,24 @@ Kirigami.ApplicationWindow {
 
     pageStack.initialPage: Qt.resolvedUrl("HomePage.qml")
 
-    // Saturated blue hairline on the four window edges, drawn on top of
-    // everything so the carbon frame reads as a single unit.
+    // Fluorescent blue hairline framing the main panel area (the page
+    // stack region between header and footer). This is the single
+    // prominent blue line the carbon design hangs off; everything else
+    // is dark grey on dark grey.
     Rectangle {
         anchors.fill: parent
         color: "transparent"
         border.width: 1
-        border.color: root.jelly.glassBorder
+        border.color: root.jelly.accent
         z: 998
     }
 
-    // Resize handles on the four edges + four corners. Each is a thin
-    // MouseArea anchored to a single side of the window; on press it
-    // hands the resize loop to the compositor via startSystemResize().
-    // Corners overlap the edges and have higher z so the diagonal cursor
-    // takes priority near the corner.
+    // Resize handles on the sides + bottom + bottom corners. Top resize
+    // is intentionally skipped: the title bar already lives there and we
+    // don't want the diagonal-cursor corners to compete with the close
+    // button. Each handle hands the resize loop to the compositor via
+    // startSystemResize() (xdg-shell on Wayland, _NET_WM_MOVERESIZE on
+    // X11).
     Item {
         anchors.fill: parent
         z: 999
@@ -198,25 +200,18 @@ Kirigami.ApplicationWindow {
         readonly property int corner: 10
 
         MouseArea {                              // left
-            x: 0; y: parent.corner
+            x: 0; y: 0
             width: parent.edge
-            height: parent.height - 2 * parent.corner
+            height: parent.height - parent.corner
             cursorShape: Qt.SizeHorCursor
             onPressed: root.startSystemResize(Qt.LeftEdge)
         }
         MouseArea {                              // right
-            x: parent.width - parent.edge; y: parent.corner
+            x: parent.width - parent.edge; y: 0
             width: parent.edge
-            height: parent.height - 2 * parent.corner
+            height: parent.height - parent.corner
             cursorShape: Qt.SizeHorCursor
             onPressed: root.startSystemResize(Qt.RightEdge)
-        }
-        MouseArea {                              // top
-            x: parent.corner; y: 0
-            width: parent.width - 2 * parent.corner
-            height: parent.edge
-            cursorShape: Qt.SizeVerCursor
-            onPressed: root.startSystemResize(Qt.TopEdge)
         }
         MouseArea {                              // bottom
             x: parent.corner; y: parent.height - parent.edge
@@ -224,19 +219,6 @@ Kirigami.ApplicationWindow {
             height: parent.edge
             cursorShape: Qt.SizeVerCursor
             onPressed: root.startSystemResize(Qt.BottomEdge)
-        }
-
-        MouseArea {                              // top-left
-            x: 0; y: 0
-            width: parent.corner; height: parent.corner
-            cursorShape: Qt.SizeFDiagCursor
-            onPressed: root.startSystemResize(Qt.TopEdge | Qt.LeftEdge)
-        }
-        MouseArea {                              // top-right
-            x: parent.width - parent.corner; y: 0
-            width: parent.corner; height: parent.corner
-            cursorShape: Qt.SizeBDiagCursor
-            onPressed: root.startSystemResize(Qt.TopEdge | Qt.RightEdge)
         }
         MouseArea {                              // bottom-left
             x: 0; y: parent.height - parent.corner

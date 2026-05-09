@@ -20,17 +20,12 @@ Item {
 
     implicitHeight: Kirigami.Units.gridUnit * 2
 
-    // Carbon backdrop with a thin blue separator at the bottom.
+    // Carbon backdrop. No bottom separator here — the main panel border
+    // drawn in Main.qml passes immediately below us and provides the
+    // visual divider between titlebar and content.
     Rectangle {
         anchors.fill: parent
         color: applicationWindow().jelly.carbonAlt
-    }
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: 1
-        color: applicationWindow().jelly.glassBorder
     }
 
     // Carbon weave overlay — same SVG as the window background but a touch
@@ -112,10 +107,10 @@ Item {
                         if (!ctrl.hovered) return "transparent";
                         return modelData.act === "close"
                             ? "#a83232"
-                            : applicationWindow().jelly.glassHover;
+                            : applicationWindow().jelly.carbonHover;
                     }
                     border.width: ctrl.hovered ? 1 : 0
-                    border.color: applicationWindow().jelly.glassBorderHot
+                    border.color: applicationWindow().jelly.accent
                     radius: 0
                 }
                 contentItem: Label {

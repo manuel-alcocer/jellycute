@@ -104,7 +104,7 @@ Kirigami.Page {
             background: Rectangle {
                 color: applicationWindow().jelly.carbonAlt
                 border.width: 1
-                border.color: applicationWindow().jelly.glassBorder
+                border.color: applicationWindow().jelly.borderSubtle
             }
 
             ColumnLayout {

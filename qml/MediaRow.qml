@@ -60,11 +60,11 @@ ColumnLayout {
             padding: 0
             background: Rectangle {
                 color: card.hovered
-                       ? applicationWindow().jelly.glassHover
+                       ? applicationWindow().jelly.carbonHover
                        : "transparent"
                 radius: Kirigami.Units.smallSpacing
                 border.width: card.hovered ? 1 : 0
-                border.color: applicationWindow().jelly.glassBorderHot
+                border.color: applicationWindow().jelly.accent
             }
 
             onClicked: root.itemClicked(index)
@@ -75,12 +75,12 @@ ColumnLayout {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: root.posterHeight
-                    color: applicationWindow().jelly.glassSurface
+                    color: applicationWindow().jelly.carbonElevated
                     radius: Kirigami.Units.smallSpacing
                     border.width: 1
                     border.color: card.hovered
-                                  ? applicationWindow().jelly.glassBorderHot
-                                  : applicationWindow().jelly.glassBorder
+                                  ? applicationWindow().jelly.accent
+                                  : applicationWindow().jelly.borderSubtle
 
                     Image {
                         anchors.fill: parent

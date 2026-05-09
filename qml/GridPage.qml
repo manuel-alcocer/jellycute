@@ -75,7 +75,7 @@ Kirigami.Page {
             background: Rectangle {
                 color: applicationWindow().jelly.carbonAlt
                 border.width: 1
-                border.color: applicationWindow().jelly.glassBorder
+                border.color: applicationWindow().jelly.borderSubtle
             }
 
             Flow {
@@ -125,11 +125,11 @@ Kirigami.Page {
 
                 background: Rectangle {
                     color: cell.hovered
-                           ? applicationWindow().jelly.glassHover
+                           ? applicationWindow().jelly.carbonHover
                            : "transparent"
                     radius: Kirigami.Units.smallSpacing
                     border.width: cell.hovered ? 1 : 0
-                    border.color: applicationWindow().jelly.glassBorderHot
+                    border.color: applicationWindow().jelly.accent
                 }
 
                 onClicked: page.navigate(index)
@@ -142,12 +142,12 @@ Kirigami.Page {
                         Layout.preferredHeight: page.useBackdropPosters
                             ? width * 9 / 16
                             : width * 3 / 2
-                        color: applicationWindow().jelly.glassSurface
+                        color: applicationWindow().jelly.carbonElevated
                         radius: Kirigami.Units.smallSpacing
                         border.width: 1
                         border.color: cell.hovered
-                                      ? applicationWindow().jelly.glassBorderHot
-                                      : applicationWindow().jelly.glassBorder
+                                      ? applicationWindow().jelly.accent
+                                      : applicationWindow().jelly.borderSubtle
 
                         Image {
                             anchors.fill: parent
@@ -211,7 +211,7 @@ Kirigami.Page {
             background: Rectangle {
                 color: applicationWindow().jelly.carbonAlt
                 border.width: 1
-                border.color: applicationWindow().jelly.glassBorder
+                border.color: applicationWindow().jelly.borderSubtle
             }
             visible: childrenModel.totalCount > page.pageSize
 
