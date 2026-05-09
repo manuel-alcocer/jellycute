@@ -1,0 +1,15 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file>icon.png</file>
+    <file>artwork.png</file>
+    <file>qml/Main.qml</file>
+    <file>qml/HomePage.qml</file>
+    <file>qml/GridPage.qml</file>
+    <file>qml/DetailPage.qml</file>
+    <file>qml/LoginPage.qml</file>
+    <file>qml/MediaRow.qml</file>
+    <file>qml/PlayerPage.qml</file>
+    <file>qml/SettingsPage.qml</file>
+  </qresource>
+</RCC>
