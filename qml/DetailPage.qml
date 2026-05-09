@@ -43,15 +43,20 @@ Kirigami.ScrollablePage {
             Layout.topMargin: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.largeSpacing * 2
 
-            // Poster
+            // Poster — sits in a glass-blue cradle with a saturated blue
+            // outline so it reads as a "framed" specimen on the carbon
+            // background.
             Rectangle {
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 14
                 Layout.preferredHeight: Kirigami.Units.gridUnit * 21
-                color: Kirigami.Theme.alternateBackgroundColor
+                color: applicationWindow().jelly.glassSurface
                 radius: Kirigami.Units.smallSpacing
+                border.width: 1
+                border.color: applicationWindow().jelly.glassBorderHot
 
                 Image {
                     anchors.fill: parent
+                    anchors.margins: 1
                     source: detailModel.posterUrl.toString() !== ""
                             ? detailModel.posterUrl
                             : (initialItem ? initialItem.posterUrl : "")

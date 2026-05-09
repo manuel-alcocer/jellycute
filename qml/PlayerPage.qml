@@ -101,7 +101,11 @@ Kirigami.Page {
         Pane {
             Layout.fillWidth: true
             padding: Kirigami.Units.largeSpacing
-            background: Rectangle { color: Kirigami.Theme.alternateBackgroundColor }
+            background: Rectangle {
+                color: applicationWindow().jelly.carbonAlt
+                border.width: 1
+                border.color: applicationWindow().jelly.glassBorder
+            }
 
             ColumnLayout {
                 anchors.fill: parent

@@ -72,7 +72,11 @@ Kirigami.Page {
         Pane {
             Layout.fillWidth: true
             padding: Kirigami.Units.smallSpacing
-            background: Rectangle { color: Kirigami.Theme.alternateBackgroundColor }
+            background: Rectangle {
+                color: applicationWindow().jelly.carbonAlt
+                border.width: 1
+                border.color: applicationWindow().jelly.glassBorder
+            }
 
             Flow {
                 anchors.left: parent.left
@@ -114,9 +118,19 @@ Kirigami.Page {
             ScrollBar.vertical: ScrollBar {}
 
             delegate: ItemDelegate {
+                id: cell
                 width: grid.cellWidth - Kirigami.Units.smallSpacing
                 height: grid.cellHeight - Kirigami.Units.smallSpacing
                 padding: 0
+
+                background: Rectangle {
+                    color: cell.hovered
+                           ? applicationWindow().jelly.glassHover
+                           : "transparent"
+                    radius: Kirigami.Units.smallSpacing
+                    border.width: cell.hovered ? 1 : 0
+                    border.color: applicationWindow().jelly.glassBorderHot
+                }
 
                 onClicked: page.navigate(index)
 
@@ -128,8 +142,12 @@ Kirigami.Page {
                         Layout.preferredHeight: page.useBackdropPosters
                             ? width * 9 / 16
                             : width * 3 / 2
-                        color: Kirigami.Theme.alternateBackgroundColor
+                        color: applicationWindow().jelly.glassSurface
                         radius: Kirigami.Units.smallSpacing
+                        border.width: 1
+                        border.color: cell.hovered
+                                      ? applicationWindow().jelly.glassBorderHot
+                                      : applicationWindow().jelly.glassBorder
 
                         Image {
                             anchors.fill: parent
@@ -190,7 +208,11 @@ Kirigami.Page {
         Pane {
             Layout.fillWidth: true
             padding: Kirigami.Units.smallSpacing
-            background: Rectangle { color: Kirigami.Theme.alternateBackgroundColor }
+            background: Rectangle {
+                color: applicationWindow().jelly.carbonAlt
+                border.width: 1
+                border.color: applicationWindow().jelly.glassBorder
+            }
             visible: childrenModel.totalCount > page.pageSize
 
             RowLayout {
