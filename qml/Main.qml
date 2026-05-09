@@ -20,6 +20,18 @@ Kirigami.ApplicationWindow {
     // on X11.
     flags: Qt.Window | Qt.FramelessWindowHint
 
+    // Transparent surface so the rounded corners painted by the title bar
+    // and the page backgrounds become actual see-through to the desktop;
+    // without this the corner pixels we don't paint would still come up
+    // as solid black.
+    color: "transparent"
+
+    // Corner radius reused by the titlebar (top-left/top-right) and the
+    // page backgrounds + main panel border (bottom-left/bottom-right).
+    // Kept modest so the close-button hover area at the very top-right
+    // doesn't visibly overlap the rounded cut.
+    readonly property int cornerRadius: 8
+
     // ---- Design tokens (carbon-only, blue strictly as accent) ------------
     // Reachable from anywhere as applicationWindow().jelly. Surfaces are
     // pure dark greys; the only blue in the visual language is the
@@ -53,39 +65,10 @@ Kirigami.ApplicationWindow {
     Kirigami.Theme.positiveTextColor:         "#7ce0a6"
     Kirigami.Theme.neutralTextColor:          "#f7c987"
 
-    color: jelly.carbonBase
-
-    // Carbon weave overlay: a tiny 2×2 checker tiled across the whole
-    // window at low opacity. The pattern is an inline SVG data URL so we
-    // don't ship a binary asset for it. Sits behind every page.
-    Image {
-        anchors.fill: parent
-        z: -1
-        fillMode: Image.Tile
-        opacity: 0.55
-        smooth: false
-        source: "data:image/svg+xml;utf8,"
-            + "<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'>"
-            + "<rect width='3' height='3' fill='%23ffffff' fill-opacity='0.018'/>"
-            + "<rect x='3' y='3' width='3' height='3' fill='%23ffffff' fill-opacity='0.018'/>"
-            + "<rect x='3' width='3' height='3' fill='%23000000' fill-opacity='0.18'/>"
-            + "<rect y='3' width='3' height='3' fill='%23000000' fill-opacity='0.18'/>"
-            + "</svg>"
-    }
-
-    // Subtle vertical gradient on top of the weave to suggest depth: dark
-    // at the very top and bottom, slightly lifted in the middle.
-    Rectangle {
-        anchors.fill: parent
-        z: -1
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#000000" }
-            GradientStop { position: 0.4; color: "#0a0d14" }
-            GradientStop { position: 0.7; color: "#0d1118" }
-            GradientStop { position: 1.0; color: "#000000" }
-        }
-        opacity: 0.5
-    }
+    // No window-level weave/gradient overlay: clipping it to the rounded
+    // shape adds complexity for a barely-visible texture. The titlebar
+    // keeps its own weave (same SVG, clipped to its rounded backdrop),
+    // which is plenty to convey the carbon-fibre look.
 
     globalDrawer: Kirigami.GlobalDrawer {
         id: drawer
@@ -276,14 +259,16 @@ Kirigami.ApplicationWindow {
     pageStack.initialPage: Qt.resolvedUrl("HomePage.qml")
 
     // Fluorescent blue hairline framing the main panel area (the page
-    // stack region between header and footer). This is the single
-    // prominent blue line the carbon design hangs off; everything else
-    // is dark grey on dark grey.
+    // stack region between header and footer). Square at the top (where
+    // it meets the titlebar) and rounded at the bottom (where it meets
+    // the window's bottom corners).
     Rectangle {
         anchors.fill: parent
         color: "transparent"
         border.width: 1
         border.color: root.jelly.accent
+        bottomLeftRadius: root.cornerRadius
+        bottomRightRadius: root.cornerRadius
         z: 998
     }
 

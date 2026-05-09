@@ -36,6 +36,8 @@ Kirigami.Page {
     // theme override above.
     background: Rectangle {
         color: applicationWindow().jelly.carbonBase
+        bottomLeftRadius: applicationWindow().cornerRadius
+        bottomRightRadius: applicationWindow().cornerRadius
     }
 
     title: qsTr("Inicio")

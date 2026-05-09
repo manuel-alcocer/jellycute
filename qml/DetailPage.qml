@@ -30,6 +30,8 @@ Kirigami.ScrollablePage {
 
     background: Rectangle {
         color: applicationWindow().jelly.carbonBase
+        bottomLeftRadius: applicationWindow().cornerRadius
+        bottomRightRadius: applicationWindow().cornerRadius
     }
 
     property string itemId: ""

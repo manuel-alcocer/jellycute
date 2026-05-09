@@ -20,28 +20,33 @@ Item {
 
     implicitHeight: Kirigami.Units.gridUnit * 2
 
-    // Carbon backdrop. No bottom separator here — the main panel border
-    // drawn in Main.qml passes immediately below us and provides the
-    // visual divider between titlebar and content.
+    // Carbon backdrop with rounded top corners that match the window's
+    // top-left / top-right. clip:true is what masks the weave Image
+    // child below to the rounded shape — without it the SVG tiling
+    // would still paint into the corner pixels we want transparent.
     Rectangle {
         anchors.fill: parent
         color: applicationWindow().jelly.carbonAlt
-    }
+        topLeftRadius: applicationWindow().cornerRadius
+        topRightRadius: applicationWindow().cornerRadius
+        clip: true
 
-    // Carbon weave overlay — same SVG as the window background but a touch
-    // more visible on the bar so it reads as actual fabric.
-    Image {
-        anchors.fill: parent
-        opacity: 0.7
-        fillMode: Image.Tile
-        smooth: false
-        source: "data:image/svg+xml;utf8,"
-            + "<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'>"
-            + "<rect width='3' height='3' fill='%23ffffff' fill-opacity='0.025'/>"
-            + "<rect x='3' y='3' width='3' height='3' fill='%23ffffff' fill-opacity='0.025'/>"
-            + "<rect x='3' width='3' height='3' fill='%23000000' fill-opacity='0.18'/>"
-            + "<rect y='3' width='3' height='3' fill='%23000000' fill-opacity='0.18'/>"
-            + "</svg>"
+        // Carbon weave overlay — same SVG as the page background uses
+        // elsewhere but a touch more visible here so the bar reads as
+        // actual fabric.
+        Image {
+            anchors.fill: parent
+            opacity: 0.7
+            fillMode: Image.Tile
+            smooth: false
+            source: "data:image/svg+xml;utf8,"
+                + "<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'>"
+                + "<rect width='3' height='3' fill='%23ffffff' fill-opacity='0.025'/>"
+                + "<rect x='3' y='3' width='3' height='3' fill='%23ffffff' fill-opacity='0.025'/>"
+                + "<rect x='3' width='3' height='3' fill='%23000000' fill-opacity='0.18'/>"
+                + "<rect y='3' width='3' height='3' fill='%23000000' fill-opacity='0.18'/>"
+                + "</svg>"
+        }
     }
 
     // Drag region: covers the whole bar but the controls Row sits on top

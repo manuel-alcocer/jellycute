@@ -33,6 +33,8 @@ Kirigami.Page {
 
     background: Rectangle {
         color: applicationWindow().jelly.carbonBase
+        bottomLeftRadius: applicationWindow().cornerRadius
+        bottomRightRadius: applicationWindow().cornerRadius
     }
 
     title: qsTr("Reproductor")
