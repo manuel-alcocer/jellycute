@@ -7,6 +7,7 @@
     <file>qml/HomePage.qml</file>
     <file>qml/GridPage.qml</file>
     <file>qml/DetailPage.qml</file>
+    <file>qml/LoginPage.qml</file>
     <file>qml/MediaRow.qml</file>
     <file>qml/PlayerPage.qml</file>
   </qresource>

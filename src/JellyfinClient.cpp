@@ -19,11 +19,17 @@ JellyfinClient::JellyfinClient(QObject* parent) : QObject(parent) {
     }
 }
 
-void JellyfinClient::setServer(const QUrl& url) { m_server = url; }
+void JellyfinClient::setServer(const QUrl& url) {
+    if (m_server == url) return;
+    m_server = url;
+    emit serverChanged();
+}
 
 void JellyfinClient::setCredentials(const QString& userId, const QString& accessToken) {
+    if (m_userId == userId && m_token == accessToken) return;
     m_userId = userId;
     m_token = accessToken;
+    emit credentialsChanged();
 }
 
 QString JellyfinClient::authHeader(bool withToken) const {
@@ -77,6 +83,7 @@ void JellyfinClient::authenticate(const QString& username, const QString& passwo
             emit authenticationFailed(tr("Respuesta de autenticación inválida"));
             return;
         }
+        emit credentialsChanged();
         emit authenticated();
     });
 }

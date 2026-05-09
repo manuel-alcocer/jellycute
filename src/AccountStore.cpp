@@ -153,6 +153,25 @@ QString AccountStore::addAccount(const AccountEntry& a) {
     return e.id;
 }
 
+QString AccountStore::addAccountWith(const QString& serverId,
+                                     const QString& username,
+                                     const QString& userId,
+                                     const QString& token) {
+    AccountEntry a;
+    a.serverId = serverId;
+    a.username = username;
+    a.userId = userId;
+    a.token = token;
+    return addAccount(a);
+}
+
+QString AccountStore::findServerIdByUrl(const QUrl& url) const {
+    for (const auto& s : m_servers) {
+        if (s.url == url) return s.id;
+    }
+    return {};
+}
+
 void AccountStore::updateAccount(const AccountEntry& a) {
     for (auto& e : m_accounts) {
         if (e.id == a.id) {

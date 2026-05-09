@@ -83,4 +83,11 @@ Kirigami.ApplicationWindow {
     }
 
     pageStack.initialPage: Qt.resolvedUrl("HomePage.qml")
+
+    Component.onCompleted: {
+        // No active account on startup → push the login form on top of the
+        // (still-empty) HomePage. LoginPage pops itself on success.
+        if (!jellyfin.authenticated)
+            pageStack.push(Qt.resolvedUrl("LoginPage.qml"));
+    }
 }

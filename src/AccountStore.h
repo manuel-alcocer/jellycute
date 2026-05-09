@@ -40,17 +40,28 @@ public:
     AccountEntry account(const QString& id) const;
 
     // Mutations write through to QSettings and emit changed().
-    QString addServer(const QString& name, const QUrl& url);
+    Q_INVOKABLE QString addServer(const QString& name, const QUrl& url);
     void updateServer(const ServerEntry& s);
-    void removeServer(const QString& id);   // also removes accounts on it.
+    Q_INVOKABLE void removeServer(const QString& id);   // also removes accounts on it.
 
     QString addAccount(const AccountEntry& a);
+    // QML-friendly variant of addAccount that takes the individual fields
+    // instead of the AccountEntry struct.
+    Q_INVOKABLE QString addAccountWith(const QString& serverId,
+                                       const QString& username,
+                                       const QString& userId,
+                                       const QString& token);
     void updateAccount(const AccountEntry& a);
-    void removeAccount(const QString& id);
+    Q_INVOKABLE void removeAccount(const QString& id);
 
-    QString currentAccountId() const;
-    void setCurrentAccountId(const QString& id);   // empty clears.
+    Q_INVOKABLE QString currentAccountId() const;
+    Q_INVOKABLE void setCurrentAccountId(const QString& id);   // empty clears.
     AccountEntry currentAccount() const;
+
+    // Search the registered servers for one whose URL matches `url`.
+    // Returns the empty string when no match exists. Used by LoginPage to
+    // avoid registering the same server twice when the user re-logs in.
+    Q_INVOKABLE QString findServerIdByUrl(const QUrl& url) const;
 
     void migrateLegacy();
 

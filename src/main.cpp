@@ -88,12 +88,17 @@ int main(int argc, char** argv) {
             "Jellycute", 1, 0, "PlaybackSession",
             QStringLiteral("Provided by the application as the 'playback' "
                            "context property"));
+        qmlRegisterUncreatableType<AccountStore>(
+            "Jellycute", 1, 0, "AccountStore",
+            QStringLiteral("Provided by the application as the 'accountStore' "
+                           "context property"));
 
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("jellyfin", &qmlClient);
         engine.rootContext()->setContextProperty("viewsModel", &viewsModel);
         engine.rootContext()->setContextProperty("resumeModel", &resumeModel);
         engine.rootContext()->setContextProperty("playback", &playback);
+        engine.rootContext()->setContextProperty("accountStore", &store);
         engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
         if (engine.rootObjects().isEmpty()) return -1;
         return app.exec();

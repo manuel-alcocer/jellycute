@@ -87,15 +87,25 @@ struct JellyfinItem {
 
 class JellyfinClient : public QObject {
     Q_OBJECT
+    Q_PROPERTY(QUrl server READ server WRITE setServer NOTIFY serverChanged)
+    Q_PROPERTY(QString userId READ userId NOTIFY credentialsChanged)
+    Q_PROPERTY(QString accessToken READ accessToken NOTIFY credentialsChanged)
+    // True once a user-id + access token are present (whether from a fresh
+    // authentication or from credentials restored at startup). QML uses this
+    // to decide whether to push LoginPage onto the page stack.
+    Q_PROPERTY(bool authenticated READ isAuthenticated NOTIFY credentialsChanged)
 public:
     explicit JellyfinClient(QObject* parent = nullptr);
 
-    void setServer(const QUrl& url);
+    Q_INVOKABLE void setServer(const QUrl& url);
     QUrl server() const { return m_server; }
 
-    void setCredentials(const QString& userId, const QString& accessToken);
+    Q_INVOKABLE void setCredentials(const QString& userId, const QString& accessToken);
     QString userId() const { return m_userId; }
     QString accessToken() const { return m_token; }
+    bool isAuthenticated() const {
+        return !m_userId.isEmpty() && !m_token.isEmpty();
+    }
 
     QString deviceId() const { return m_deviceId; }
     QString clientName() const { return m_clientName; }
@@ -164,6 +174,8 @@ public:
                                qint64 positionTicks);
 
 signals:
+    void serverChanged();
+    void credentialsChanged();
     void authenticated();
     void authenticationFailed(const QString& message);
     void viewsLoaded(const QList<JellyfinItem>& items);
