@@ -11,12 +11,17 @@
 // previous selection's pending result so stale items don't bleed in.
 class BrowseModel : public ItemListModel {
     Q_OBJECT
+    Q_PROPERTY(JellyfinClient* client READ client WRITE wireClient NOTIFY clientChanged)
     Q_PROPERTY(int totalCount READ totalCount NOTIFY totalCountChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
 public:
     explicit BrowseModel(QObject* parent = nullptr);
     BrowseModel(JellyfinClient* client, QObject* parent = nullptr);
 
+    // Hooks the model up to a JellyfinClient (typically the app's shared
+    // instance, exposed in QML as the `jellyfin` context property). Safe to
+    // call only once per instance — re-wiring would leak the prior client's
+    // signal connections.
     void wireClient(JellyfinClient* client);
 
     int totalCount() const { return m_totalCount; }
@@ -37,6 +42,7 @@ public:
     Q_INVOKABLE void loadEpisodes(const QString& seriesId);
 
 signals:
+    void clientChanged();
     void totalCountChanged();
     void loadingChanged();
     void loadFailed(const QString& message);

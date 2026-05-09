@@ -10,6 +10,7 @@ BrowseModel::BrowseModel(JellyfinClient* client, QObject* parent)
 void BrowseModel::wireClient(JellyfinClient* client) {
     if (m_client == client) return;
     setClient(client);
+    emit clientChanged();
     if (!client) return;
 
     connect(client, &JellyfinClient::resumeLoaded, this, &BrowseModel::onResume);

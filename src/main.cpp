@@ -71,12 +71,19 @@ int main(int argc, char** argv) {
         // start is allowed so the shell still opens.
 
         BrowseModel viewsModel(&qmlClient);
+        BrowseModel resumeModel(&qmlClient);
 
         qmlRegisterType<MpvObject>("Jellycute", 1, 0, "MpvObject");
+        qmlRegisterType<BrowseModel>("Jellycute", 1, 0, "BrowseModel");
+        qmlRegisterUncreatableType<JellyfinClient>(
+            "Jellycute", 1, 0, "JellyfinClient",
+            QStringLiteral("Provided by the application as the 'jellyfin' "
+                           "context property"));
 
         QQmlApplicationEngine engine;
-        engine.rootContext()->setContextProperty("client", &qmlClient);
+        engine.rootContext()->setContextProperty("jellyfin", &qmlClient);
         engine.rootContext()->setContextProperty("viewsModel", &viewsModel);
+        engine.rootContext()->setContextProperty("resumeModel", &resumeModel);
         engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
         if (engine.rootObjects().isEmpty()) return -1;
         return app.exec();
